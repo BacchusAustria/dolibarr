@@ -1,6 +1,6 @@
 // src/MobileTakePos.jsx
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, User, CreditCard, Printer, Search, Plus, Minus, X, Check, Edit3, Percent, ChevronRight, ChevronLeft } from 'lucide-react';
+import { ShoppingCart, User, CreditCard, Printer, Search, Plus, Minus, X, Check, LogOut, Edit3, Percent, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useCart } from './hooks/useCart';
 import { useDolibarrData } from './hooks/useDolibarrData';
 import { api } from './api';
@@ -8,13 +8,14 @@ import ProductModal from './components/ProductModal';
 import DiscountModal from './components/DiscountModal';
 import CustomerSelector from './components/CustomerSelector';
 import PaymentView from './components/PaymentView';
+import CustomerModal from './components/CustomerModal';
 
 // Mock-Daten für die Demo (nur noch Kategorien/Produkte)
 const mockCategories = [
-  { id: 1, name: 'Getränke', color: 'bg-blue-500' },
-  { id: 2, name: 'Speisen', color: 'bg-green-500' },
-  { id: 3, name: 'Desserts', color: 'bg-purple-500' },
-  { id: 4, name: 'Snacks', color: 'bg-orange-500' }
+  { id: 1, name: 'Getränke', color: 'bg-[#828f9a]' }, // Angepasst
+  { id: 2, name: 'Speisen', color: 'bg-[#818872]' }, // Angepasst
+  { id: 3, name: 'Desserts', color: 'bg-[#CBCEBD]' }, // Angepasst
+  { id: 4, name: 'Snacks', color: 'bg-[#171819]' } // Angepasst
 ];
 
 const mockProducts = [
@@ -46,27 +47,30 @@ export default function MobileTakePos() {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [printReceipt, setPrintReceipt] = useState(true);
   const [longPressTimer, setLongPressTimer] = useState(null);
+  const [logoutTimer, setLogoutTimer] = useState(null); // New state for logout long-press
 
   const [apiKey, setApiKey] = useState(localStorage.getItem('dolibarrApiKey') || '');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  const [selectedCustomer, setSelectedCustomer] = useState({ id: 0, name: 'Standard-Kunde' });
+  // ANPASSUNG 1: selectedCustomer initial auf null setzen
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
 
   // Custom Hooks
   const { cartItems, setCartItems, globalDiscount, setGlobalDiscount, 
           addToCart, updateCartItem, removeFromCart, applyItemDiscount, 
           calculateItemTotal, subtotal, globalDiscountAmount, cartTotal, resetCart } = useCart();
 
-  const { customerList, categoryList, productList, dataLoading, dataError, 
-          getMainCategories, getSubcategories, getAllSubcategoryIds } = useDolibarrData(apiKey);
+  const { customerList, categoryList, productList, dataLoading, dataError, defaultCustomer,
+        getMainCategories, getSubcategories, getAllSubcategoryIds } = useDolibarrData(apiKey);
 
-  useEffect(() => {
-    // Set default customer once customerList is loaded, if not already set
-    if (customerList.length > 0 && selectedCustomer.id === 0) {
-      setSelectedCustomer(customerList[0]);
-    }
-  }, [customerList, selectedCustomer.id]);
+useEffect(() => {
+  if (defaultCustomer && !selectedCustomer) {
+    console.log('Setting default customer:', defaultCustomer);
+    setSelectedCustomer(defaultCustomer);
+  }
+}, [defaultCustomer, selectedCustomer]);
+  
 
   // Category navigation functions
   const navigateToCategory = (categoryId) => {
@@ -164,286 +168,291 @@ export default function MobileTakePos() {
     setDiscountModal(null);
   };
 
-  const completeTransaction = async () => {
-    const paidAmount = parseFloat(paymentAmount);
-    const changeAmount = paidAmount - cartTotal;
-
-    if (!paymentAmount || paidAmount < cartTotal) {
-      alert('Bezahlter Betrag ist zu niedrig!');
-      return;
-    }
-
+   const handleCreateCustomer = async (formData) => {
     try {
       if (!apiKey || apiKey === 'undefined') {
         throw new Error('Kein gültiger API-Key vorhanden. Bitte neu einloggen.');
       }
 
-      // 1. Rechnung in Dolibarr erstellen (erst ohne Zeilen)
-      const invoiceData = {
-        socid: selectedCustomer.id === 0 ? null : selectedCustomer.id, // Changed to socid
-        type: 0, 
-        date: Math.floor(Date.now() / 1000),
-        note_private: `Mobile TakePos - ${new Date().toLocaleString('de-DE')}`,
-        mode_reglement_id: 4, // 4 = Cash
-        cond_reglement_id: 1 // 1 = Immediate
-      };
-
-      console.log('Sending invoice to Dolibarr:', invoiceData);
-      const invoiceId = await api.createInvoice(apiKey, invoiceData);
-      console.log('Invoice created with ID:', invoiceId);
-
-      // Verbesserte lineData für addInvoiceLine in MobileTakePos.jsx
-// Ersetze den bestehenden lineData Code (circa Zeile 195-210) mit diesem:
-
-// 1a. Rechnungszeilen einzeln hinzufügen
-for (const item of cartItems) {
-  const lineData = {
-    desc: item.name,
-    label: item.name,
-    qty: item.quantity,
-    subprice: item.price,
-    tva_tx: 0, // VAT rate
-    fk_product: parseInt(item.id),
-    product_type: 1, // 1 for product, 0 for service
-    remise_percent: item.discount && item.discount.type === 'percent' ? item.discount.value : 0,
-    localtax1_tx: 0,
-    localtax2_tx: 0,
-    // Zusätzliche Felder um PHP-Warnings zu vermeiden:
-    fk_fournprice: null,
-    pa_ht: 0,
-    date_start: null,
-    date_end: null,
-    fk_code_ventilation: 0,
-    info_bits: 0,
-    fk_remise_except: null,
-    price_base_type: 'HT', // oder 'TTC' je nach Konfiguration
-    rang: 0,
-    special_code: 0,
-    origin: null,
-    origin_id: null,
-    array_options: {},
-    situation_percent: 100,
-    fk_prev_id: null,
-    fk_unit: null,
-    ref_ext: null
-  };
-  
-  try {
-    await api.addInvoiceLine(apiKey, invoiceId, lineData);
-  } catch (lineError) {
-    console.warn(`Warning: Could not add line for product ${item.name}:`, lineError);
-  }
-}
-
-// Add global discount as a separate line if applicable
-if (globalDiscount.value > 0) {
-  const discountLineData = {
-    desc: `Gesamtrabatt (${globalDiscount.value}${globalDiscount.type === 'percent' ? '%' : '€'})`,
-    label: `Gesamtrabatt (${globalDiscount.value}${globalDiscount.type === 'percent' ? '%' : '€'})`,
-    qty: 1,
-    subprice: -globalDiscountAmount, // Negative value for discount
-    tva_tx: 0,
-    product_type: 0, // Service line for discount
-    remise_percent: 0,
-    localtax1_tx: 0,
-    localtax2_tx: 0,
-    fk_product: null,
-    // Zusätzliche Felder um PHP-Warnings zu vermeiden:
-    fk_fournprice: null,
-    pa_ht: 0,
-    date_start: null,
-    date_end: null,
-    fk_code_ventilation: 0,
-    info_bits: 0,
-    fk_remise_except: null,
-    price_base_type: 'HT',
-    rang: 0,
-    special_code: 0,
-    origin: null,
-    origin_id: null,
-    array_options: {},
-    situation_percent: 100,
-    fk_prev_id: null,
-    fk_unit: null,
-    ref_ext: null
-  };
-  
-  try {
-    await api.addInvoiceLine(apiKey, invoiceId, discountLineData);
-  } catch (discountError) {
-    console.warn('Warning: Could not add discount line:', discountError);
-  }
-}
-      // Add global discount as a separate line if applicable
-      if (globalDiscount.value > 0) {
-        const discountLineData = {
-          desc: `Gesamtrabatt (${globalDiscount.value}${globalDiscount.type === 'percent' ? '%' : '€'})`,
-          label: `Gesamtrabatt (${globalDiscount.value}${globalDiscount.type === 'percent' ? '%' : '€'})`, // Added label
-          qty: 1,
-          subprice: -globalDiscountAmount, // Negative value for discount
-          tva_tx: 0,
-          product_type: 0, // Treat discount as a service line or special type if product_type required
-          remise_percent: 0,
-          localtax1_tx: 0,
-          localtax2_tx: 0,
-          fk_product: null, // No product associated with a global discount line
-        };
-        try {
-          await api.addInvoiceLine(apiKey, invoiceId, discountLineData);
-        } catch (discountError) {
-          console.warn('Warning: Could not add discount line:', discountError);
-        }
-      }
-
-      // 2. Rechnung validieren
-      try {
-        await api.validateInvoice(apiKey, invoiceId);
-      } catch (validateError) {
-        console.warn('Warning: Invoice could not be validated:', validateError);
-      }
-
-      // 3. Zahlung erfassen
-
-        const PaymentData = {
-          closepaidinvoices: 'yes', // Close specific invoice
-          accountid: 1, // Default bank account, adjust if necessary
-          datepaye: Math.floor(Date.now() / 1000),
-          paymentid: 0,
-          num_payment: `CASH-ALT-${Date.now()}`,
-          amount: paidAmount
-        };
-        try {
-            console.log('Recording payment:', PaymentData);
-          await api.recordPayment(apiKey, invoiceId, PaymentData);
-          console.log('Payment recorded method.');
-        } catch (PaymentError) {
-          console.warn('Warning: Payment could not be recorded:', PaymentError);
-        }
-
-      // 4. PDF-Beleg generieren und öffnen (falls gewünscht)
-      if (printReceipt) {
-        try {
-          const downloadUrl = await api.generatePdf(apiKey, invoiceId);
-          window.open(downloadUrl, '_blank');
-          console.log('PDF generated and opened.');
-        } catch (pdfError) {
-          console.warn('PDF could not be generated or opened:', pdfError);
-          // Fallback to a print-friendly summary if PDF generation fails
-          const printWindow = window.open('', '_blank');
-          printWindow.document.write(`
-            <html>
-              <head>
-                <title>Beleg ${invoiceId}</title>
-                <style>
-                  body { font-family: Arial, sans-serif; margin: 20px; }
-                  .header { text-align: center; margin-bottom: 20px; }
-                  .customer { margin-bottom: 20px; }
-                  .items { margin-bottom: 20px; }
-                  .total { font-weight: bold; margin-top: 10px; border-top: 1px solid #000; }
-                  @media print { button { display: none; } }
-                </style>
-              </head>
-              <body>
-                <div class="header">
-                  <h2>Kassenbeleg</h2>
-                  <p>Rechnung Nr.: ${invoiceId}</p>
-                  <p>Datum: ${new Date().toLocaleString('de-DE')}</p>
-                </div>
-                
-                <div class="customer">
-                  <strong>Kunde:</strong> ${selectedCustomer.name}
-                </div>
-                
-                <div class="items">
-                  <h3>Positionen:</h3>
-                  ${cartItems.map(item => `
-                    <div>${item.quantity}x ${item.name} - ${calculateItemTotal(item).toFixed(2)}€</div>
-                  `).join('')}
-                  ${globalDiscount.value > 0 ? `
-                    <div>Gesamtrabatt (${globalDiscount.value}${globalDiscount.type === 'percent' ? '%' : '€'}): -${globalDiscountAmount.toFixed(2)}€</div>
-                  ` : ''}
-                </div>
-                
-                <div class="total">
-                  Gesamt: ${cartTotal.toFixed(2)}€<br>
-                  Bezahlt: ${paidAmount.toFixed(2)}€<br>
-                  Wechselgeld: ${changeAmount.toFixed(2)}€
-                </div>
-                
-                <button onclick="window.print()">Drucken</button>
-              </body>
-            </html>
-          `);
-          printWindow.document.close();
-        }
-      }
-
-      alert(`✅ Transaktion erfolgreich abgeschlossen!
-Rechnung Nr.: ${invoiceId}
-Kunde: ${selectedCustomer.name}
-Gesamt: ${cartTotal.toFixed(2)}€
-Bezahlt: ${paidAmount.toFixed(2)}€
-Wechselgeld: ${changeAmount.toFixed(2)}€
-${printReceipt ? 'Beleg wird geöffnet...' : ''}`);
-
-      resetCart();
-      setPaymentAmount('');
-      setCurrentView('main');
-      setSelectedCustomer(customerList[0]); // Reset to default customer
-    } catch (error) {
-      console.error('Error during transaction:', error);
+      console.log('Creating customer with data:', formData);
       
-      if (error.message.includes('Authentication') || error.message.includes('einloggen')) {
+      // API-Aufruf zum Erstellen des Kunden
+      const newCustomer = await api.createCustomer(apiKey, formData);
+      
+      console.log('Customer created successfully:', newCustomer);
+      
+      // Die Kundenliste wird automatisch durch den useDolibarrData Hook aktualisiert
+      // beim nächsten Render-Zyklus
+      
+      return newCustomer;
+    } catch (error) {
+      console.error('Error creating customer:', error);
+      
+      if (error.message.includes('Authentication') || error.message.includes('401') || error.message.includes('einloggen')) {
         if (window.confirm('API-Sitzung abgelaufen. Möchten Sie sich neu einloggen?')) {
           localStorage.removeItem('dolibarrApiKey');
           setApiKey('');
-          return; // Don't reset cart if re-logging in
         }
       }
       
-      // Local storage fallback for receipts
-      const receiptData = {
-        timestamp: new Date().toLocaleString('de-DE'),
-        customer: selectedCustomer.name,
-        items: cartItems.map(item => ({
-          name: item.name,
-          quantity: item.quantity,
-          price: item.price,
-          total: calculateItemTotal(item)
-        })),
-        subtotal: subtotal,
-        globalDiscount: globalDiscount.value > 0 ? {
-          type: globalDiscount.type,
-          value: globalDiscount.value,
-          amount: globalDiscountAmount
-        } : null,
-        total: cartTotal,
-        paid: paidAmount,
-        change: changeAmount
+      throw error; // Re-throw für Modal error handling
+    }
+  };
+
+  const handleUpdateCustomer = async (customerId, formData) => {
+    try {
+      if (!apiKey || apiKey === 'undefined') {
+        throw new Error('Kein gültiger API-Key vorhanden. Bitte neu einloggen.');
+      }
+
+      console.log('Updating customer with ID:', customerId, 'Data:', formData);
+      
+      // API-Aufruf zum Aktualisieren des Kunden
+      const updatedCustomer = await api.updateCustomer(apiKey, customerId, formData);
+      
+      console.log('Customer updated successfully:', updatedCustomer);
+      
+      // Die Kundenliste wird automatisch durch den useDolibarrData Hook aktualisiert
+      // beim nächsten Render-Zyklus
+      
+      return updatedCustomer;
+    } catch (error) {
+      console.error('Error updating customer:', error);
+      
+      if (error.message.includes('Authentication') || error.message.includes('401') || error.message.includes('einloggen')) {
+        if (window.confirm('API-Sitzung abgelaufen. Möchten Sie sich neu einloggen?')) {
+          localStorage.removeItem('dolibarrApiKey');
+          setApiKey('');
+        }
+      }
+      
+      throw error; // Re-throw für Modal error handling
+    }
+  };
+
+  // Logout Handlers
+  const handleLogoutStart = () => {
+    const timer = setTimeout(() => {
+      if (window.confirm('Möchten Sie sich wirklich abmelden?')) {
+        localStorage.removeItem('dolibarrApiKey');
+        setApiKey('');
+        // ANPASSUNG 3: selectedCustomer beim Logout auf null setzen
+        setSelectedCustomer(defaultCustomer);
+        resetCart(); // Clear cart on logout
+      }
+      setLogoutTimer(null); // Clear timer regardless of confirmation
+    }, 1000); // 1000ms for Long Press to logout
+    setLogoutTimer(timer);
+  };
+
+  const handleLogoutEnd = () => {
+    if (logoutTimer) {
+      clearTimeout(logoutTimer);
+      setLogoutTimer(null);
+    }
+  };
+
+const completeTransaction = async (actualPaymentAmount) => {
+  const finalPaymentAmount = actualPaymentAmount || paymentAmount;
+  const paidAmount = parseFloat(finalPaymentAmount);
+  const changeAmount = paidAmount - cartTotal;
+  const customerToUse = selectedCustomer || defaultCustomer;
+
+  try {
+    if (!apiKey || apiKey === 'undefined') {
+      throw new Error('Kein gültiger API-Key vorhanden. Bitte neu einloggen.');
+    }
+
+    // 1. Rechnung in Dolibarr erstellen
+    const invoiceData = {
+      socid: customerToUse ? customerToUse.id : null,
+      module_source: "takepos",
+      pos_source: "1",
+      type: 0,
+      date: Math.floor(Date.now() / 1000),
+      note_private: `Mobile TakePos - ${new Date().toLocaleString('de-DE')}`,
+      mode_reglement_id: 4,
+      cond_reglement_id: 1
+    };
+
+    console.log('Sending invoice to Dolibarr:', invoiceData);
+    const invoiceId = await api.createInvoice(apiKey, invoiceData);
+    console.log('Invoice created with ID:', invoiceId);
+
+
+    //Wenn der Gesamtrabatt in € angegeben ist muss dieser auf % umgerechnet werden damit der Rabatt
+    //  auf die Einzelposten angewendet werden kann
+    let globalDiscountPercent = 0;
+    if (globalDiscount.value > 0){
+      if( globalDiscount.type === 'euro') {
+        globalDiscountPercent = (globalDiscount.value / subtotal) * 100;
+      }
+      else if (globalDiscount.type === 'percent') {
+        globalDiscountPercent = globalDiscount.value;
+      }
+    }
+// 2. Rechnungszeilen hinzufügen
+for (const item of cartItems) {
+  let discount = 0;
+  let discountCheck = 0;
+  if (item.discount && item.discount.type === 'percent') {
+    discount = item.discount.value;
+  } else if (item.discount && item.discount.type === 'euro') {
+    discount = (item.discount.value / item.price) * 100;
+  }
+  discount = discount + globalDiscountPercent;
+
+  const lineData = {
+    qty: item.quantity,
+    subprice: item.price,        // Brutto übergeben
+    tva_tx: item.tax,
+    fk_product: parseInt(item.id),
+    remise_percent: discount,
+    price_base_type: 'TTC'
+  };
+
+      
+      try {
+        await api.addInvoiceLine(apiKey, invoiceId, lineData);
+      } catch (lineError) {
+        console.warn(`Warning: Could not add line for product ${item.name}:`, lineError);
+      }
+    }
+
+    // 3. Globalen Rabatt hinzufügen
+    // nur eine Info, der Rabatt wird bei den Einzelposten abgezogen damit die MWSt korrekt berrechnet wird
+    if (globalDiscount.value > 0) {
+      const discountLineData = {
+        desc: `Die Preise beinhalten einen Gesamtrabatt von  ${globalDiscount.value}${globalDiscount.type === 'percent' ? '%' : '€'}`,
+        qty: 1,
+        subprice: 0,
+        situation_percent: 100
       };
+      
+      try {
+        await api.addInvoiceLine(apiKey, invoiceId, discountLineData);
+      } catch (discountError) {
+        console.warn('Warning: Could not add discount line:', discountError);
+      }
+    }
 
-      const offlineReceipts = JSON.parse(localStorage.getItem('offlineReceipts') || '[]');
-      offlineReceipts.push(receiptData);
-      localStorage.setItem('offlineReceipts', JSON.stringify(offlineReceipts));
+    // 4. Rechnung validieren
+    try {
+      await api.validateInvoice(apiKey, invoiceId);
+    } catch (validateError) {
+      console.warn('Warning: Invoice could not be validated:', validateError);
+    }
 
-      alert(`⚠️ Rechnung konnte nicht in Dolibarr gespeichert werden!
+    // 5. Zahlung erfassen
+    const PaymentData = {
+      closepaidinvoices: 'yes',
+      accountid: 1,
+      datepaye: Math.floor(Date.now() / 1000),
+      paymentid: 0,
+      num_payment: `CASH-ALT-${Date.now()}`,
+      amount: paidAmount
+    };
+
+    // 6. validierte Rechnung abfragen
+    const validatedInvoice = await api.getInvoiceDetails(apiKey, invoiceId);
+    
+    try {
+      console.log('Recording payment:', PaymentData);
+      await api.recordPayment(apiKey, invoiceId, PaymentData);
+      console.log('Payment recorded method.');
+    } catch (PaymentError) {
+      console.warn('Warning: Payment could not be recorded:', PaymentError);
+    }
+
+    // ERFOLGREICH: Rechnungsdaten für Modal vorbereiten
+    const successData = {
+      invoice: {
+        id: invoiceId,
+        reference: validatedInvoice.ref,
+        total: cartTotal,
+        date: new Date().toISOString()
+      },
+      payment: {
+        method: 'Bargeld',
+        amount: paidAmount,
+        change: changeAmount
+      },
+      customer: customerToUse
+    };
+
+    // ⚠️ WICHTIG: Nur bei erfolgreicher API-Transaktion zurücksetzen
+    // Der Reset wird jetzt von PaymentView gesteuert, nicht hier!
+    
+    return successData; // Daten für ReceiptModal zurückgeben
+
+  } catch (error) {
+    console.error('Error during transaction:', error);
+    
+    if (error.message.includes('Authentication') || error.message.includes('einloggen')) {
+      if (window.confirm('API-Sitzung abgelaufen. Möchten Sie sich neu einloggen?')) {
+        localStorage.removeItem('dolibarrApiKey');
+        setApiKey('');
+        return null; // Kein Reset bei erneuter Anmeldung
+      }
+    }
+    
+    // Offline-Fallback
+    const receiptData = {
+      timestamp: new Date().toLocaleString('de-DE'),
+      customer: customerToUse ? customerToUse.name : 'Kein Kunde ausgewählt',
+      items: cartItems.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+        total: calculateItemTotal(item)
+      })),
+      subtotal: subtotal,
+      globalDiscount: globalDiscount.value > 0 ? {
+        type: globalDiscount.type,
+        value: globalDiscount.value,
+        amount: globalDiscountAmount
+      } : null,
+      total: cartTotal,
+      paid: paidAmount,
+      change: changeAmount
+    };
+
+    const offlineReceipts = JSON.parse(localStorage.getItem('offlineReceipts') || '[]');
+    offlineReceipts.push(receiptData);
+    localStorage.setItem('offlineReceipts', JSON.stringify(offlineReceipts));
+
+    // Auch bei Fehler Daten für Modal bereitstellen (falls gewünscht)
+    const failureData = {
+      invoice: {
+        id: `OFFLINE_${Date.now()}`,
+        reference: `R${Date.now().toString().slice(-6)}`,
+        total: cartTotal,
+        date: new Date().toISOString(),
+        offline: true
+      },
+      payment: {
+        method: 'Bargeld',
+        amount: paidAmount,
+        change: changeAmount
+      },
+      customer: customerToUse,
+      error: error.message
+    };
+
+    alert(`⚠️ Rechnung konnte nicht in Dolibarr gespeichert werden!
 Fehler: ${error.message}
 
 Die Transaktion wurde lokal gespeichert.
-Kunde: ${selectedCustomer.name}
+Kunde: ${customerToUse ? customerToUse.name : 'Kein Kunde ausgewählt'}
 Gesamt: ${cartTotal.toFixed(2)}€
 Bezahlt: ${paidAmount.toFixed(2)}€
 Wechselgeld: ${changeAmount.toFixed(2)}€
 
 Bitte später manuell in Dolibarr nachtragen.`);
 
-      // Reset anyway, even if API failed
-      resetCart();
-      setPaymentAmount('');
-      setCurrentView('main');
-      setSelectedCustomer(customerList[0]);
-    }
-  };
+    return failureData; // Auch bei Fehler Daten zurückgeben
+  }
+};
 
   if (!apiKey) {
     return (
@@ -482,7 +491,7 @@ Bitte später manuell in Dolibarr nachtragen.`);
                 alert('Login fehlgeschlagen: ' + err.message);
               }
             }}
-            className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
+            className="w-full bg-[#828f9a] text-white p-2 rounded hover:bg-[#171819]" // Angepasst
           >
             Einloggen
           </button>
@@ -494,77 +503,83 @@ Bitte später manuell in Dolibarr nachtragen.`);
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
       {/* Header */}
-      <div className="bg-blue-600 text-white p-3 shadow-lg">
+      <div className="bg-[#828f9a] text-white p-3 shadow-lg"> {/* Angepasst */}
         <div className="flex justify-between items-center">
           <h1 className="text-lg font-bold">Mobile TakePos</h1>
           <div className="flex space-x-2">
             <button
-              onClick={() => setCurrentView('customer')}
-              className={`p-2 rounded-lg ${selectedCustomer.id === 0 ? 'bg-blue-500' : 'bg-green-500'}`}
-              title="Kunde auswählen"
-            >
-              <User size={18} />
-            </button>
+  onClick={() => setCurrentView('customer')}
+  className={`p-2 rounded-lg ${
+    selectedCustomer && selectedCustomer.name === 'AbHof Kunde' 
+      ? 'bg-[#818872]'  // Grün für Default-Kunde
+      : selectedCustomer 
+        ? 'bg-[#CBCEBD] text-[#171819]'  // Gelb für anderen Kunde
+        : 'bg-red-500'  // Rot für keinen Kunde
+  }`}
+  title="Kunde auswählen"
+>
+  <User size={18} />
+</button>
             <button
               onClick={() => cartItems.length > 0 && setCurrentView('payment')}
-              className={`p-2 rounded-lg ${cartItems.length > 0 ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500'}`}
+              className={`p-2 rounded-lg ${cartItems.length > 0 ? 'bg-[#818872] hover:bg-[#CBCEBD]' : 'bg-gray-500'}`} // Angepasst
               disabled={cartItems.length === 0}
               title="Zahlung abschließen"
             >
               <CreditCard size={18} />
             </button>
             <button
-              onClick={() => {
-                localStorage.removeItem('dolibarrApiKey');
-                setApiKey('');
-                setSelectedCustomer({ id: 0, name: 'Standard-Kunde' }); // Reset customer on logout
-                resetCart(); // Clear cart on logout
-              }}
-              className="ml-2 p-2 bg-red-500 text-white rounded"
-              title="Logout"
+              onTouchStart={handleLogoutStart}
+              onTouchEnd={handleLogoutEnd}
+              onMouseDown={handleLogoutStart}
+              onMouseUp={handleLogoutEnd}
+              onMouseLeave={handleLogoutEnd} // Important for desktop to clear timer if mouse leaves button
+              className="ml-2 p-2 bg-red-500 text-white rounded" // Signalfarbe bleibt
+              title="Zum Abmelden gedrückt halten"
             >
-              Logout
+              <LogOut size={18} />
             </button>
           </div>
         </div>
         
         <div className="mt-1 text-sm opacity-90">
-          Kunde: {selectedCustomer.name}
-        </div>
+  Kunde: {selectedCustomer ? selectedCustomer.name : 'Wird geladen...'}
+  {dataLoading && <span className="ml-2 text-xs">(Daten werden geladen...)</span>}
+</div>
       </div>
 
       {/* Main View with Split-View */}
       {currentView === 'main' && (
         <div className="flex-1 flex flex-col">
           {/* Cart Section (Upper Part) */}
-          <div className="bg-white shadow-sm border-b" style={{ minHeight: '200px', maxHeight: '40vh' }}>
-            <div className="p-3 border-b bg-gray-50">
+          <div className="bg-white shadow-sm border-b" style={{ minHeight: '200px', maxHeight: '40vh' }}> {/* */}
+            <div className="p-3 border-b bg-gray-50"> {/* */}
               <div className="flex justify-between items-center">
                 <h2 className="font-medium text-gray-700">Warenkorb</h2>
                 <div className="flex items-center space-x-2">
                   {cartItems.length > 0 && (
                     <button
                       onClick={() => openDiscountModal('global')}
-                      className="p-1 bg-orange-500 text-white rounded hover:bg-orange-600"
+                      className="p-1 bg-orange-500 text-white rounded hover:bg-orange-600" // Signalfarbe bleibt
                       title="Gesamtrabatt"
                     >
                       <Percent size={16} />
                     </button>
                   )}
-                  <div className="text-lg font-bold text-blue-600">
+                  <div className="text-lg font-bold text-[#828f9a]"> {/* Angepasst */}
                     {cartTotal.toFixed(2)}€
                   </div>
                 </div>
               </div>
               {globalDiscount.value > 0 && (
-                <div className="mt-1 text-xs text-orange-600">
+                <div className="mt-1 text-xs text-orange-600"> {/* Signalfarbe bleibt */}
                   Gesamtrabatt: -{globalDiscountAmount.toFixed(2)}€ 
                   ({globalDiscount.value}{globalDiscount.type === 'percent' ? '%' : '€'})
                 </div>
               )}
             </div>
             
-            <div className="overflow-y-auto" style={{ maxHeight: 'calc(40vh - 60px)' }}>
+            <div className="overflow-y-auto" style={{ maxHeight: 'calc(40vh - 60px)' }}> {/* */}
               {cartItems.length === 0 ? (
                 <div className="flex items-center justify-center h-32 text-gray-400">
                   <div className="text-center">
@@ -575,13 +590,13 @@ Bitte später manuell in Dolibarr nachtragen.`);
               ) : (
                 <div className="p-2">
                   {cartItems.map((item, index) => (
-                    <div key={`${item.id}-${index}`} className="flex items-center justify-between p-2 bg-gray-50 rounded mb-2">
+                    <div key={`${item.id}-${index}`} className="flex items-center justify-between p-2 bg-gray-50 rounded mb-2"> {/* */}
                       <div className="flex items-center space-x-2 flex-1">
                         <span className="text-lg">{item.image}</span>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium truncate">{item.name}</div>
                           {(item.price !== item.originalPrice || item.discount.value > 0) && (
-                            <div className="text-xs text-orange-600">
+                            <div className="text-xs text-orange-600"> {/* Signalfarbe bleibt */}
                               {item.price !== item.originalPrice && "Preis angepasst"}
                               {item.price !== item.originalPrice && item.discount.value > 0 && " • "}
                               {item.discount.value > 0 && `${item.discount.value}${item.discount.type === 'percent' ? '%' : '€'} Rabatt`}
@@ -622,7 +637,7 @@ Bitte später manuell in Dolibarr nachtragen.`);
                           onClick={() => openDiscountModal('item', index)}
                           className={`p-1 rounded hover:bg-orange-200 ${
                             item.discount.value > 0 ? 'bg-orange-500 text-white' : 'bg-gray-200 text-gray-600'
-                          }`}
+                          }`} // Signalfarbe bleibt
                           title="Positionsrabatt"
                         >
                           <Percent size={10} />
@@ -630,7 +645,7 @@ Bitte später manuell in Dolibarr nachtragen.`);
                         
                         <button
                           onClick={() => removeFromCart(index)}
-                          className="p-1 text-red-500 hover:text-red-700"
+                          className="p-1 text-red-500 hover:text-red-700" // Signalfarbe bleibt
                           title="Position entfernen"
                         >
                           <X size={10} />
@@ -658,7 +673,7 @@ Bitte später manuell in Dolibarr nachtragen.`);
                   placeholder="Produkt suchen..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#828f9a]" // Angepasst
                 />
               </div>
             </div>
@@ -681,7 +696,7 @@ Bitte später manuell in Dolibarr nachtragen.`);
                         setSelectedCategory(null);
                         setCategoryPath([]);
                       }}
-                      className="hover:text-blue-600"
+                      className="hover:text-[#828f9a]" // Angepasst
                     >
                       Alle
                     </button>
@@ -694,8 +709,8 @@ Bitte später manuell in Dolibarr nachtragen.`);
                             setCategoryPath(newPath);
                             setSelectedCategory(pathItem.id);
                           }}
-                          className={`hover:text-blue-600 ${
-                            index === categoryPath.length - 1 ? 'font-medium text-blue-600' : ''
+                          className={`hover:text-[#828f9a] ${ // Angepasst
+                            index === categoryPath.length - 1 ? 'font-medium text-[#828f9a]' : '' // Angepasst
                           }`}
                         >
                           {pathItem.name}
@@ -711,7 +726,7 @@ Bitte später manuell in Dolibarr nachtragen.`);
                 {selectedCategory === null && (
                   <button
                     onClick={() => navigateToCategory(null)}
-                    className="px-3 py-1.5 text-sm rounded-lg whitespace-nowrap bg-blue-500 text-white"
+                    className="px-3 py-1.5 text-sm rounded-lg whitespace-nowrap bg-[#828f9a] text-white" // Angepasst
                   >
                     Alle
                   </button>
@@ -732,13 +747,13 @@ Bitte später manuell in Dolibarr nachtragen.`);
                           onClick={() => navigateToCategory(category.id)}
                           className={`px-3 py-1.5 text-sm rounded-lg whitespace-nowrap flex items-center space-x-1 ${
                             isSelected
-                              ? 'bg-blue-500 text-white' 
+                              ? 'bg-[#828f9a] text-white' // Angepasst
                               : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                           }`}
                         >
                           <span>{category.name}</span>
                           {hasSubcategories && (
-                            <ChevronRight size={14} className={isSelected ? 'text-blue-200' : 'text-gray-500'} />
+                            <ChevronRight size={14} className={isSelected ? 'text-[#CBCEBD]' : 'text-gray-500'} /> // Angepasst
                           )}
                         </button>
                       );
@@ -776,7 +791,8 @@ Bitte später manuell in Dolibarr nachtragen.`);
                   >
                     <div className="text-2xl mb-2">{product.image}</div>
                     <div className="font-medium text-gray-800 text-sm">{product.name}</div>
-                    <div className="text-blue-600 font-bold text-sm">{product.price.toFixed(2)}€</div>
+                    <div className="text-[#828f9a] font-bold text-sm">{product.price.toFixed(2)}€</div> {/* Angepasst */}
+
                   </button>
                 ))}
               </div>
@@ -817,6 +833,7 @@ Bitte später manuell in Dolibarr nachtragen.`);
         onClose={() => setDiscountModal(null)}
       />
 
+      
       {/* Customer Selection View */}
       {currentView === 'customer' && (
         <CustomerSelector
@@ -826,26 +843,36 @@ Bitte später manuell in Dolibarr nachtragen.`);
           customerSearchTerm={customerSearchTerm}
           setCustomerSearchTerm={setCustomerSearchTerm}
           onClose={() => setCurrentView('main')}
+          onCreateCustomer={handleCreateCustomer}
+          onUpdateCustomer={handleUpdateCustomer}
+          apiKey={apiKey}
         />
       )}
 
       {/* Payment Processing View */}
       {currentView === 'payment' && (
-        <PaymentView
-          cartItems={cartItems}
-          subtotal={subtotal}
-          globalDiscount={globalDiscount}
-          globalDiscountAmount={globalDiscountAmount}
-          cartTotal={cartTotal}
-          paymentAmount={paymentAmount}
-          setPaymentAmount={setPaymentAmount}
-          printReceipt={printReceipt}
-          setPrintReceipt={setPrintReceipt}
-          completeTransaction={completeTransaction}
-          calculateItemTotal={calculateItemTotal}
-          onClose={() => setCurrentView('main')}
-        />
-      )}
+  <PaymentView
+    cartItems={cartItems}
+    subtotal={subtotal}
+    globalDiscount={globalDiscount}
+    globalDiscountAmount={globalDiscountAmount}
+    cartTotal={cartTotal}
+    paymentAmount={paymentAmount}
+    setPaymentAmount={setPaymentAmount}
+    printReceipt={printReceipt}
+    setPrintReceipt={setPrintReceipt}
+    completeTransaction={completeTransaction}
+    calculateItemTotal={calculateItemTotal}
+    onClose={() => setCurrentView('main')}
+    apiKey={apiKey}
+    
+    // ⚠️ NEUE PROPS HINZUFÜGEN:
+    customer={selectedCustomer}
+    companyInfo={{}} // Falls verfügbar, sonst leer
+    resetCart={resetCart}
+    setSelectedCustomer={setSelectedCustomer}
+  />
+)}
     </div>
   );
 }

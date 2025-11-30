@@ -62,9 +62,159 @@ export const api = {
     return data.map(c => ({
       id: parseInt(c.id),
       name: c.name,
+      firstname: c.firstname || '',
       company: c.name_alias || '',
-      email: c.email || ''
+      email: c.email || '',
+      phone: c.phone || '',
+      address: c.address || '',
+      zip: c.zip || '',
+      town: c.town || '',
+      country: c.country_code || 'DE',
+      code_client: c.code_client || 'auto',
+      note_private: c.note_private || '',
+      status: c.status || 1,
+      particulier: c.particulier || 0
     }));
+  },
+
+  fetchCountries: async (apiKey) => {
+    const response = await fetch(`${serverUrl}/api/index.php/setup/dictionary/countries?sortfield=code&sortorder=ASC&limit=100&lang=de_AT`, {
+      headers: { 
+        'DOLAPIKEY': apiKey, 
+        'Accept': 'application/json'
+      }
+    });
+    const data = await handleApiResponse(response);
+    return data.reduce((acc, country) => {
+      acc[country.label] = parseInt(country.id);
+      return acc;
+    }, {});
+  },
+
+  createCustomer: async (apiKey, customerData) => {
+    // Länder-IDs abrufen für Land-Zuordnung
+    let countryIds = {};
+    try {
+      countryIds = await api.fetchCountries(apiKey);
+    } catch (error) {
+      console.warn('Could not fetch countries for customer creation:', error);
+    }
+
+    // Basis-Daten für Kunden-Erstellung
+    const requestData = {
+      name: customerData.name,
+      name_alias: customerData.firstname ? `${customerData.firstname} ${customerData.name}` : customerData.name,
+      firstname: customerData.firstname || '',
+      client: 1, // 1 = Kunde
+      supplier: 0,
+      email: customerData.email || '',
+      phone: customerData.phone || '',
+      address: customerData.address || '',
+      zip: customerData.zip || '',
+      town: customerData.town || '',
+      code_client: customerData.customerCode|| 'auto',
+      note_private: customerData.notes || '',
+      particulier: customerData.company ? 0 : 1, // 0 = Firma, 1 = Privatperson
+      status: 1, // Aktiv
+    };
+
+    // Customer Code nur hinzufügen wenn explizit angegeben
+    if (customerData.customerCode && customerData.customerCode.trim() !== '') {
+      requestData.code_client = customerData.customerCode.trim();
+    }
+    // Wenn leer: Feld komplett weglassen für Auto-Generierung durch Dolibarr (Monkey)
+
+    // Land nur setzen wenn verfügbar und nicht leer
+    if (customerData.country && customerData.country.trim() !== '') {
+      if (countryIds[customerData.country]) {
+        requestData.country_id = countryIds[customerData.country];
+      }
+    }
+
+    console.log('Creating customer with data:', requestData);
+    console.log('body:', JSON.stringify(requestData, null, 2));
+
+    const response = await fetch(`${serverUrl}/api/index.php/thirdparties`, {
+      method: 'POST',
+      headers: { 
+        'DOLAPIKEY': apiKey, 
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestData)
+    });
+    
+    const customerId = await handleApiResponse(response);
+    console.log('Customer created with ID:', customerId);
+    
+    // Erstellten Kunden abrufen, um vollständige Daten zu erhalten
+    return await api.getCustomer(apiKey, customerId);
+  },
+
+  updateCustomer: async (apiKey, customerId, customerData) => {
+    const requestData = {
+      name: customerData.name,
+      name_alias: customerData.firstname ? `${customerData.firstname} ${customerData.name}` : customerData.name,
+      firstname: customerData.firstname || '',
+      email: customerData.email || '',
+      phone: customerData.phone || '',
+      address: customerData.address || '',
+      zip: customerData.zip || '',
+      town: customerData.town || '',
+      country_code: customerData.country || 'DE',
+      code_client: customerData.customerCode || '',
+      note_private: customerData.notes || '',
+      particulier: customerData.company ? 0 : 1,
+    };
+
+    console.log('Updating customer with ID:', customerId, 'Data:', requestData);
+
+    const response = await fetch(`${serverUrl}/api/index.php/thirdparties/${customerId}`, {
+      method: 'PUT',
+      headers: {
+        'DOLAPIKEY': apiKey,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestData)
+    });
+
+    await handleApiResponse(response);
+    console.log('Customer updated successfully');
+
+    // Aktualisierten Kunden abrufen
+    return await api.getCustomer(apiKey, customerId);
+  },
+
+  getCustomer: async (apiKey, customerId) => {
+    const response = await fetch(`${serverUrl}/api/index.php/thirdparties/${customerId}`, {
+      method: 'GET',
+      headers: {
+        'DOLAPIKEY': apiKey,
+        'Accept': 'application/json'
+      },
+    });
+
+    const customer = await handleApiResponse(response);
+    console.log('Retrieved customer:', customer);
+    
+    // Daten in einheitliches Format bringen
+    return {
+      id: parseInt(customer.id),
+      name: customer.name || '',
+      firstname: customer.firstname || '',
+      company: customer.particulier === 0 ? customer.name : '', // Bei Firmen ist Name = Firmenname
+      email: customer.email || '',
+      phone: customer.phone || '',
+      address: customer.address || '',
+      zip: customer.zip || '',
+      town: customer.town || '',
+      country: customer.country_code || 'DE',
+      code_client: customer.code_client || '',
+      note_private: customer.note_private || '',
+      status: customer.status || 1,
+      particulier: customer.particulier || 0
+    };
   },
 
   fetchProducts: async (apiKey) => {
@@ -98,7 +248,8 @@ export const api = {
         return {
           id: parseInt(p.id),
           name: p.label || p.ref || `Produkt ${p.id}`,
-          price: parseFloat(p.price || p.price_ttc || 0),
+          price: parseFloat(p.multiprices_ttc['2'] || 0),
+          tax: parseFloat(p.multiprices_tva_tx['2'] || 0),
           category: category,
           image: '🏷️'
         };
@@ -126,6 +277,7 @@ export const api = {
       headers: { 'DOLAPIKEY': apiKey, 'Accept': 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify(invoiceData)
     });
+    console.log('Create Invoice Response:', response);
     return handleApiResponse(response);
   },
 
@@ -146,7 +298,6 @@ export const api = {
     return handleApiResponse(response);
   },
 
-
   recordPayment: async (apiKey, invoiceId, paymentData) => {
     const response = await fetch(`${serverUrl}/api/index.php/invoices/${invoiceId}/settopaid`, {
       method: 'POST',
@@ -166,10 +317,33 @@ export const api = {
         langcode: 'de_DE'
       })
     });
+    console.log('body:', JSON.stringify({
+      modulepart: 'facture',
+      original_file: `${invoiceId}/${invoiceId}.pdf`,
+      doctemplate: '',
+      langcode: 'de_DE'
+    }, null, 2));
     // Dolibarr's builddoc API returns just a success/error status, not the PDF itself.
     // The actual PDF download is via a direct URL.
     // We still call handleApiResponse to catch potential errors in the response structure
     await handleApiResponse(response); 
     return `${serverUrl}/document.php?modulepart=facture&file=${invoiceId}/${invoiceId}.pdf&entity=1`;
+  },
+  getInvoiceDetails:  async (apiKey, invoiceId) => {
+  try {
+    const response = await fetch(`${serverUrl}/api/index.php/invoices/${invoiceId}`, {
+      method: 'GET',
+      headers: {
+        'DOLAPIKEY': apiKey,
+        'Accept': 'application/json'
+      },
+    });
+
+    const data = await handleApiResponse(response);
+    return data; // Die Dolibarr-Rechnungsdaten
+  } catch (error) {
+    console.error("Failed to fetch invoice details:", error);
+    return null;
   }
-};
+  
+}};

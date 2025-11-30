@@ -22,19 +22,82 @@ const mockProducts = [
   { id: 10, name: 'Chips', price: 1.80, category: 4, image: '🍟' }
 ];
 
+const DEFAULT_CUSTOMER_NAME = 'AbHof Kunde';
+
 export function useDolibarrData(apiKey) {
   const [customerList, setCustomerList] = useState([]);
   const [categoryList, setCategoryList] = useState([]);
   const [productList, setProductList] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState(null);
+  const [defaultCustomer, setDefaultCustomer] = useState(null);
+
+
+  // Function to ensure default customer exists
+  const ensureDefaultCustomer = async (customers, apiKey) => {
+    // Look for existing default customer
+    let defaultCust = customers.find(c => c.name === DEFAULT_CUSTOMER_NAME);
+    
+    if (!defaultCust && apiKey && apiKey !== 'undefined') {
+      try {
+        // Create the default customer if it doesn't exist
+        const customerData = {
+          name: DEFAULT_CUSTOMER_NAME,
+          name_alias: 'AbHof Standard Kunde',
+          client: 1, // Mark as customer
+          fournisseur: 0, // Not a supplier
+          particulier: 0, // Not an individual
+          status: 1, // Active
+          code_client: 'ABHOF_DEFAULT',
+          address: '',
+          zip: '',
+          town: '',
+          country_id: 1, // Adjust according to your Dolibarr setup
+          email: '',
+          phone: ''
+        };
+
+        console.log('Creating default customer:', DEFAULT_CUSTOMER_NAME);
+        defaultCust = await api.createCustomer(apiKey, customerData);
+        console.log('Default customer created:', defaultCust);
+        
+        // Add to customer list
+        customers.push(defaultCust);
+      } catch (error) {
+        console.error('Failed to create default customer:', error);
+        // Create a fallback customer for offline mode
+        defaultCust = { 
+          id: -1, 
+          name: DEFAULT_CUSTOMER_NAME, 
+          company: 'AbHof Standard Kunde',
+          email: '' 
+        };
+        customers.push(defaultCust);
+      }
+    } else if (!defaultCust) {
+      // In offline/mock mode, create mock default customer
+      defaultCust = { 
+        id: -1, 
+        name: DEFAULT_CUSTOMER_NAME, 
+        company: 'AbHof Standard Kunde',
+        email: '' 
+      };
+      customers.push(defaultCust);
+    }
+
+    return defaultCust;
+  };
 
   useEffect(() => {
     async function loadData() {
       if (!apiKey || apiKey === 'undefined') {
-        setCustomerList([{ id: 0, name: 'Standard-Kunde' }]);
+        const mockCustomers = [{ id: 0, name: 'Standard-Kunde' }];
+        const defaultCust = await ensureDefaultCustomer(mockCustomers, apiKey);
+        
+        setCustomerList(mockCustomers);
         setCategoryList(mockCategories);
         setProductList(mockProducts);
+        setDefaultCustomer(defaultCust);
         setDataLoading(false);
         return;
       }
@@ -49,18 +112,26 @@ export function useDolibarrData(apiKey) {
           api.fetchCategories(apiKey)
         ]);
 
-        customers.unshift({ id: 0, name: 'Standard-Kunde' }); // Add default customer
+        // Ensure default customer exists
+        const defaultCust = await ensureDefaultCustomer(customers, apiKey);
+
         setCustomerList(customers);
         setProductList(products);
         setCategoryList(categories);
+        setDefaultCustomer(defaultCust);
 
       } catch (error) {
         console.error('Fehler beim Laden der Dolibarr-Daten:', error);
         setDataError(error);
+        
         // Fallback to mock data on error
-        setCustomerList([{ id: 0, name: 'Standard-Kunde' }]);
+        const fallbackCustomers = [{ id: 0, name: 'Standard-Kunde' }];
+        const defaultCust = await ensureDefaultCustomer(fallbackCustomers, null);
+        
+        setCustomerList(fallbackCustomers);
         setProductList(mockProducts);
         setCategoryList(mockCategories);
+        setDefaultCustomer(defaultCust);
       } finally {
         setDataLoading(false);
       }
@@ -100,6 +171,7 @@ export function useDolibarrData(apiKey) {
     productList,
     dataLoading,
     dataError,
+    defaultCustomer,
     getMainCategories,
     getSubcategories,
     getAllSubcategoryIds
