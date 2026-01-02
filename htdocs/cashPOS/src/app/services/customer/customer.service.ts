@@ -1,31 +1,49 @@
+// src/app/services/customer/customer.service.ts
 import { Injectable } from '@angular/core';
-import { ApiService } from '../api.service';
+import { BehaviorSubject, firstValueFrom, Observable } from 'rxjs';
 import { Customer } from '../../models/customer.model';
-import { firstValueFrom } from 'rxjs';
+import { ApiService } from '../api.service';
+// Annahme: MOCK_DATA ist für die Demo vorhanden
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class CustomerService {
-  constructor(private api: ApiService) {}
+  
+  private _customers = new BehaviorSubject<Customer[]>([]);
+  public readonly customers$: Observable<Customer[]> = this._customers.asObservable();
 
-  async getCustomers(): Promise<Customer[]> {
-    return firstValueFrom(this.api.get<Customer[]>('/thirdparties'));
+  private _selectedCustomer = new BehaviorSubject<Customer | null>(null);
+  public readonly selectedCustomer$: Observable<Customer | null> = this._selectedCustomer.asObservable();
+
+  constructor(private apiService: ApiService) {}
+
+  public async loadCustomers(): Promise<void> {
+    if (this._customers.getValue().length > 0) return;
+
+    try {
+      const customers =  await firstValueFrom(this.apiService.get<Customer[]>('/thirdparties'));
+      this._customers.next(customers);
+      // Setzt den Standardkunden nach dem Laden
+      const defaultCustomer = customers.find(c => c.name === 'AbHof Kunde');
+      // Setzt den Standardkunden nach dem Laden, falls gefunden
+      if (defaultCustomer) {
+        this.setSelectedCustomer(defaultCustomer);
+      }
+      
+    } catch (error) {
+      console.error('Kunden konnten nicht geladen werden', error);
+      throw error;
+    }
+  }
+public getCustomers(): Customer[] {
+      return this._customers.getValue();
+  }
+  public setSelectedCustomer(customer: Customer) {
+    this._selectedCustomer.next(customer);
   }
 
-  async getCustomerById(id: string): Promise<Customer> {
-    return firstValueFrom(this.api.get<Customer>(`/thirdparties/${id}`));
-  }
-
-  async createCustomer(customer: Partial<Customer>): Promise<Customer> {
-    return firstValueFrom(this.api.post<Customer>('/thirdparties', customer));
-  }
-
-  async updateCustomer(id: string, customer: Partial<Customer>): Promise<Customer> {
-    return firstValueFrom(this.api.put<Customer>(`/thirdparties/${id}`, customer));
-  }
-
-  async deleteCustomer(id: string): Promise<void> {
-    await firstValueFrom(this.api.delete<void>(`/thirdparties/${id}`));
+  public getSelectedCustomer(): Customer | null {
+    return this._selectedCustomer.getValue();
   }
 }

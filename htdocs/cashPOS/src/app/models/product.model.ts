@@ -11,7 +11,10 @@ export interface Product {
 
     /** Beschreibung des Produkts (kann lang sein) */
     description: string; 
-    multiprices_ttc? : number[];
+    /** Array von Verkaufspreis-Stufen als Strings (indexiert nach Preis-Level) */
+    multiprices_ttc? :{
+        [priceLevelKey: string]: number;
+    }
 
     /** Verkaufspreis ohne Steuern/Mehrwertsteuer (price_ttc ist der inkl. Steuern) */
     price: number; 

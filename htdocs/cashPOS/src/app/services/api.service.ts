@@ -1,11 +1,20 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
-import { catchError, retry, timeout } from 'rxjs/operators';
+import { catchError, map, retry, timeout } from 'rxjs/operators';
+
+
+export interface ApiOptions {
+  responseType?: 'json' | 'text';
+  // hier könnten später auch headers etc. stehen
+}
 
 @Injectable({
   providedIn: 'root'
+  
 })
+
+
 export class ApiService {
   private apiUrl = 'https://mittermayer.bplaced.net/dolibarr/htdocs/api/index.php'; // Base API URL - configure as needed
   private timeoutDuration = 30000; // 30 seconds timeout
@@ -26,6 +35,7 @@ export class ApiService {
    * @param params - Optional query parameters
    * @returns Observable with the response data
    */
+  
   public get<T>(endpoint: string, params?: any): Observable<T> {
     let httpParams = new HttpParams();
     
@@ -49,12 +59,16 @@ export class ApiService {
    * @param data - The data to send in the request body
    * @returns Observable with the response data
    */
-  public post<T>(endpoint: string, data: any): Observable<T> {
+  public post<T>(endpoint: string, data: any, options: ApiOptions = {responseType: 'json'}): Observable<T> {
     return this.http.post<T>(`${this.apiUrl}${endpoint}`, data, {
-      headers: this.getHeaders()
+      headers: this.getHeaders(),
+      responseType: options.responseType as any
     })
       .pipe(
         timeout(this.timeoutDuration),
+        map(res => {
+          return res as T;
+        }),
         catchError(this.handleError)
       );
   }

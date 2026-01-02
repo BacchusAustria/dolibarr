@@ -1,0 +1,104 @@
+<div class="h-full flex flex-col bg-gray-50">
+  
+  <div class="bg-white border-b px-4 py-3 flex items-center justify-between shadow-sm">
+    <h2 class="text-xl font-bold text-gray-800">Zahlung</h2>
+    <button (click)="cancel.emit()" class="text-gray-500 hover:text-gray-700">
+      <span class="text-sm">Abbrechen ✕</span>
+    </button>
+  </div>
+
+  <div class="flex-1 flex flex-col p-4 max-w-2xl mx-auto w-full space-y-6 overflow-y-auto">
+    
+    <div class="bg-[#828f9a] text-white p-6 rounded-xl shadow-md text-center">
+      <div class="text-sm opacity-80 mb-1">Zu zahlender Betrag</div>
+      <div class="text-4xl font-bold">{{ cartTotal | currency:'EUR':'symbol':'1.2-2' }}</div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-3">
+      @for (option of paymentOptions; track option.type) {
+  <button 
+    (click)="selectedPaymentTypeChange.emit(option.type)"
+    [class.selected]="selectedPaymentType === option.type"
+    class="payment-option border-2 rounded-xl p-4 flex flex-col items-center gap-2"
+  >
+    @switch (option.type) {
+      @case ('cash') {
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="6" width="20" height="12" rx="2"></rect>
+          <circle cx="12" cy="12" r="2"></circle>
+          <path d="M6 12h.01M18 12h.01"></path>
+        </svg>
+      }
+      @case ('delivery') {
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 18H3c-1 0-2-1-2-2V5c0-1 1-2 2-2h14c1 0 2 1 2 2v10"></path>
+          <path d="M14 18H6"></path>
+          <circle cx="17" cy="18" r="2"></circle>
+          <circle cx="7" cy="18" r="2"></circle>
+          <path d="M19 18h2c1 0 2-1 2-2v-5l-4-4h-4v11"></path>
+        </svg>
+      }
+      @case ('invoice') {
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+        </svg>
+      }
+    }
+    <span class="font-medium">{{ option.label }}</span>
+  </button>
+}
+    </div>
+
+    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+      <label class="block text-sm font-medium text-gray-600 mb-2">
+        Gegebener Betrag
+      </label>
+      <div class="relative">
+        <input 
+          type="number" 
+          [ngModel]="paymentAmount" 
+          (ngModelChange)="paymentAmountChange.emit($event)"
+          [readonly]="selectedPaymentType !== 'cash'"
+          placeholder="0.00"
+          class="w-full text-right text-3xl font-bold p-3 border rounded-lg focus:ring-2 focus:ring-[#828f9a] focus:outline-none"
+        />
+        <span class="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 text-xl">€</span>
+      </div>
+
+      <div *ngIf="selectedPaymentType === 'cash'" class="grid grid-cols-4 gap-2 mt-3">
+        <button (click)="fillTotal()" class="col-span-2 bg-[#818872] text-white py-2 rounded-lg font-medium hover:opacity-90">
+          Passend
+        </button>
+        <button (click)="quickPay(5)" class="bg-gray-200 py-2 rounded-lg font-medium hover:bg-gray-300">5€</button>
+        <button (click)="quickPay(10)" class="bg-gray-200 py-2 rounded-lg font-medium hover:bg-gray-300">10€</button>
+        <button (click)="quickPay(20)" class="bg-gray-200 py-2 rounded-lg font-medium hover:bg-gray-300">20€</button>
+        <button (click)="quickPay(50)" class="bg-gray-200 py-2 rounded-lg font-medium hover:bg-gray-300">50€</button>
+        <button (click)="quickPay(100)" class="bg-gray-200 py-2 rounded-lg font-medium hover:bg-gray-300">100€</button>
+        <button (click)="quickPay(200)" class="bg-gray-200 py-2 rounded-lg font-medium hover:bg-gray-300">200€</button>
+      </div>
+    </div>
+
+    <div *ngIf="selectedPaymentType === 'cash' && paidAmount > cartTotal" 
+         class="bg-green-50 p-4 rounded-xl border border-green-100 text-center animate-pulse">
+      <div class="text-green-800 text-sm font-medium">Rückgeld</div>
+      <div class="text-green-700 text-3xl font-bold">{{ changeAmount | currency:'EUR':'symbol':'1.2-2' }}</div>
+    </div>
+
+  </div>
+
+  <div class="p-4 bg-white border-t flex space-x-3">
+    <button (click)="cancel.emit()" 
+            class="flex-1 py-4 border border-gray-300 rounded-xl font-bold text-gray-600 hover:bg-gray-50">
+      Zurück
+    </button>
+    <button (click)="completeTransaction.emit()" 
+            [disabled]="selectedPaymentType === 'cash' && paidAmount < cartTotal"
+            class="flex-[2] py-4 bg-[#828f9a] text-white rounded-xl font-bold text-lg hover:bg-[#171819] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg flex items-center justify-center">
+      <span>Zahlung abschließen</span>
+      <span class="ml-2">✓</span>
+    </button>
+  </div>
+</div>

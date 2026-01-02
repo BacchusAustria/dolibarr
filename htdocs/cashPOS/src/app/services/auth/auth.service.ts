@@ -23,7 +23,7 @@ export class AuthService {
     if (!token) {
       throw new Error('No token received from server');
     }
-    
+    this.setStoredToken(token);
     return token;
   }
 
@@ -31,6 +31,9 @@ export class AuthService {
     localStorage.removeItem('dolibarrApiKey');
   }
 
+  setStoredToken(token: string): void {
+    localStorage.setItem('dolibarrApiKey', token);
+  }
   getStoredToken(): string {
     return localStorage.getItem('dolibarrApiKey') || '';
   }

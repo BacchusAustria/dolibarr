@@ -1,0 +1,45 @@
+<div class="p-3">
+  <div class="px-3 py-2 bg-gray-50 border-b flex items-center justify-between">
+    <div class="flex items-center space-x-2">
+      <svg class="w-5 h-5 text-[#828f9a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+      </svg>
+      <h2 class="font-semibold text-[#828f9a]">Warenkorb</h2>
+    </div>
+  </div>
+
+  <div class="overflow-y-auto max-h-64">
+    <div *ngIf="(cart.cartItems$ | async)?.length === 0" class="p-8 text-center text-gray-400">
+      <p>Warenkorb leer</p>
+    </div>
+
+    <ng-template #emptyCart>
+      <div class="p-8 text-center text-gray-400">
+        <p>Warenkorb leer</p>
+      </div>
+    </ng-template>
+
+    <div *ngIf="(cart.cartItems$ | async) as items; else emptyCart">
+      <div *ngIf="items.length > 0" class="divide-y">
+        <div *ngFor="let item of items; let i = index; trackBy: trackById" class="p-3 hover:bg-gray-50">
+          <div class="flex items-start justify-between">
+            <div class="flex items-start space-x-2 flex-1">
+              <div class="text-2xl">{{ item.label }}</div>
+              <div class="flex-1">
+                <div class="font-medium">{{ item.label }}</div>
+                <div class="flex items-center space-x-2 mt-2">
+                  <button (click)="cart.updateItem(i, {quantity: item.quantity - 1})" class="p-1 bg-gray-300 rounded hover:bg-gray-400">-</button>
+                  <span class="font-medium min-w-[2rem] text-center">{{ item.quantity }}</span>
+                  <button (click)="cart.updateItem(i, {quantity: item.quantity + 1})" class="p-1 bg-gray-300 rounded hover:bg-gray-400">+</button>
+                  <input type="number" [ngModel]="item.price" (ngModelChange)="cart.updateItem(i, {price:$event})" class="w-12 text-xs text-right border rounded px-1" step="0.01" min="0" />
+                  <span class="text-xs">€</span>
+                  <button (click)="cart.removeItem(i)" class="p-1 text-red-500 hover:text-red-700">✕</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>
