@@ -27,13 +27,13 @@ export class PaymentComponent {
   @Input() customer: Customer | null = null;
   @Input() paymentAmount: string = '';
   @Input() selectedPaymentType: 'cash' | 'delivery' | 'invoice' = 'cash';
-  
+
   // Outputs (Events zurück an den App-Container)
   @Output() paymentAmountChange = new EventEmitter<string>();
   @Output() selectedPaymentTypeChange = new EventEmitter<'cash' | 'delivery' | 'invoice'>();
   @Output() completeTransaction = new EventEmitter<void>();
   @Output() cancel = new EventEmitter<void>();
-
+  
   // Zahlungsoptionen zur einfachen Iteration
   readonly paymentOptions = [
     {

@@ -9,6 +9,8 @@ export interface ApiOptions {
   // hier könnten später auch headers etc. stehen
 }
 
+
+
 @Injectable({
   providedIn: 'root'
   
@@ -113,6 +115,23 @@ export class ApiService {
   public delete<T>(endpoint: string): Observable<T> {
     return this.http.delete<T>(`${this.apiUrl}${endpoint}`)
       .pipe(
+        timeout(this.timeoutDuration),
+        catchError(this.handleError)
+      );
+  }
+
+  /**
+   * GET request for Blob (files like PDFs)
+   * @param endpoint - The API endpoint
+   * @returns Observable with Blob data
+   */
+  public getBlob(endpoint: string): Observable<Blob> {
+    return this.http.get(`${this.apiUrl}${endpoint}`, {
+      headers: this.getHeaders(),
+      responseType: 'blob'
+    })
+      .pipe(
+        retry(this.retryAttempts),
         timeout(this.timeoutDuration),
         catchError(this.handleError)
       );

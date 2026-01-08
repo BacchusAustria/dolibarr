@@ -1,126 +1,188 @@
 import { Injectable } from '@angular/core';
-import { lastValueFrom } from 'rxjs'; 
+import { lastValueFrom } from 'rxjs';
 import { ApiService } from '../api.service';
 import { CartItem } from '../../models/cart.model';
 
-export interface DolibarrInvoice {
+// Interfaces für bessere Typensicherheit
+export interface DolibarrOrder {
     id: string;
+    socid: string;
     ref: string;
     total_ttc: string;
-    date: number;
-    socname: string;
-    paye: string; // "0" für offen, "1" für bezahlt
-    status: string; // "3" für storniert
+    lines?: any[]; // Vereinfacht, enthält die Zeilen-IDs die wir fürs Mapping brauchen
 }
 
 @Injectable({
     providedIn: 'root'
 })
+export class DeliveryService {
 
-export class InvoiceService {
     constructor(private apiService: ApiService) { }
 
     /**
-     * Erstellt einen Rechnungsentwurf
-     * Rückgabe: Die ID der Rechnung als String
+     * Hauptprozess: Erstellt einen kompletten Lieferschein aus dem Warenkorb.
+     * Wrapper-Funktion, die alle Schritte nacheinander ausführt.
      */
+    async createFullDeliveryProcess(socid: string, items: CartItem[]): Promise<string> {
+        try {
+            // 1. Auftrag (Commande) anlegen
+            const orderId = await this.createOrderDraft(socid);
+            console.log('Order Draft created:', orderId);
 
-    async createDraft(socid: string): Promise<string> {
+            // 2. Positionen zum Auftrag hinzufügen
+            for (const item of items) {
+                await this.addOrderLine(orderId, item);
+            }
+
+            // 3. Auftrag validieren
+            await this.validateOrder(orderId);
+            console.log('Order validated');
+
+            // 4. Lieferschein (Shipment) aus Auftrag erstellen
+            // Dazu müssen wir den validierten Auftrag neu laden, um die Zeilen-IDs zu bekommen
+            const validatedOrder = await this.getOrder(orderId);
+            const shipmentId = await this.createShipmentFromOrder(validatedOrder);
+            console.log('Shipment created:', shipmentId);
+
+            // 5. Lieferschein validieren (bucht Bestand)
+            await this.validateShipment(shipmentId);
+            console.log('Shipment validated');
+
+            // 6. Lieferschein abschließen
+            await this.closeShipment(shipmentId);
+            console.log('Shipment closed');
+
+            return shipmentId;
+
+        } catch (error) {
+            console.error('Error in delivery process:', error);
+            throw error;
+        }
+    }
+
+    // --- Schritt 1: Auftrag anlegen ---
+
+    async createOrderDraft(socid: string): Promise<string> {
         const payload = {
-            socid: socid, // Kunden-ID
-            type: 0, // Verkaufsrechnung
+            socid: socid,
+            type: 0, // Standard-Bestellung
             date: Math.floor(Date.now() / 1000),
-            note_private: `Kassen-Rechnung - ${new Date().toLocaleString('de-DE')}`,
-            pos_source: '1', //das ist die Nummer der Kasse
-            module_source: 'takepos', //wichtig fürdie Belegnummern-Generierung (Steuert den Nummernkreis)
-            mode_reglement_id: '4', //Zahlungsmodus: Barzahlung
-            cond_reglement_id: '1' //Zahlungsbedingung: sofort
+            date_livraison: Math.floor(Date.now() / 1000), // Lieferdatum = Heute
+            note_private: `POS-Lieferschein - ${new Date().toLocaleString('de-DE')}`,
+            origin: 'takepos', // Markierung Herkunft
+            shipping_method_id: 1 // Optional: Abholung oder Versandart ID setzen
         };
 
-        const response = await lastValueFrom(this.apiService.post<any>('/invoices', payload));
-
+        const response = await lastValueFrom(this.apiService.post<any>('/orders', payload));
         return typeof response === 'object' ? String(response.id) : String(response);
     }
 
-    /**
-     * Fügt eine Position hinzu
-     */
-    async addLine(invoiceId: string, item: CartItem): Promise<void> {
+    // --- Schritt 2: Positionen hinzufügen ---
+
+    async addOrderLine(orderId: string, item: CartItem): Promise<void> {
         const payload = {
-            subprice: item.price,
+            subprice: item.price, // Nettopreis oder Brutto je nach Konfig
             qty: item.quantity,
             tva_tx: item.tva_tx,
             fk_product: parseInt(item.id),
             remise_percent: item.discount?.type === 'percent' ? item.discount.value : 0,
-            price_base_type: 'TTC' // Preis inklusive Steuern
+            price_base_type: 'TTC', // Preis inkl. Steuern, analog zu InvoiceService
+            product_type: item.type // Wichtig für Service vs. Produkt
         };
-        try {
-            await lastValueFrom(
-                this.apiService.post(`/invoices/${invoiceId}/lines`, payload, { responseType: 'text' })
-            );
-        } catch (error) {
-            console.error('Line Add Error:', error);
-            throw error;
-        }
+
+        await lastValueFrom(
+            this.apiService.post(`/orders/${orderId}/lines`, payload, { responseType: 'text' })
+        );
     }
 
-    /**
-       * Validieren
-       */
-    async validate(invoiceId: string): Promise<void> {
-        try {
-            await lastValueFrom(
-                this.apiService.post(`/invoices/${invoiceId}/validate`, {}, { responseType: 'text' })
-            );
-        } catch (error) {
-            console.error('Invoice Validation Error:', error);
-            throw error;
-        }
+    // --- Schritt 3: Auftrag validieren ---
 
+    async validateOrder(orderId: string): Promise<void> {
+        // idwarehouse: '1' könnte hier übergeben werden, um Lager für Reservierung zu setzen
+        await lastValueFrom(
+            this.apiService.post(`/orders/${orderId}/validate`, { idwarehouse: '1' }, { responseType: 'text' })
+        );
     }
 
-    /**
-     * Zahlung buchen
-     */
-    async addPayment(invoiceId: string, amount: number, paymentType: string): Promise<void> {
+    // --- Hilfsfunktion: Auftrag holen (für Mapping) ---
+
+    async getOrder(orderId: string): Promise<DolibarrOrder> {
+        return await lastValueFrom(this.apiService.get<DolibarrOrder>(`/orders/${orderId}`));
+    }
+
+    // --- Schritt 4: Lieferschein (Shipment) erstellen ---
+
+    async createShipmentFromOrder(order: DolibarrOrder): Promise<string> {
+        if (!order.lines || order.lines.length === 0) {
+            throw new Error('Order has no lines to ship');
+        }
+
+        const shipmentLines = order.lines.map((line: any) => ({
+            origin_line_id: line.id,
+            qty: parseFloat(line.qty) // Volle Menge liefern
+        }));
+
         const payload = {
-            datepaye: Math.floor(Date.now() / 1000),
-            paymentid: this.mapPaymentType(paymentType),
-            closepaidinvoices: "yes",
-            amount: amount,
-            accountid: 1, // Standard-Kassenkonto
-            num_payment: `POS-${new Date().toISOString()}`
+            socid: order.socid,
+            type: 0,
+            origin_type: 'order',
+            origin_id: order.id,
+            lines: shipmentLines,
+            date: Math.floor(Date.now() / 1000),
+            date_livraison: Math.floor(Date.now() / 1000),
+            note_private: 'Erstellt mit CashPOS',
+            shipping_method_id: 1
         };
-        try {
-            await lastValueFrom(
-                this.apiService.post(`/invoices/${invoiceId}/payments`, payload, { responseType: 'text' })
-            );
-        } catch (error) {
-            console.error('Payment Add Error:', error);
-            throw error;
-        }
+
+
+        const response = await lastValueFrom(this.apiService.post<any>('/shipments', payload));
+        return typeof response === 'object' ? String(response.id) : String(response);
     }
 
+    // --- Schritt 5: Lieferschein validieren ---
+
+    async validateShipment(shipmentId: string): Promise<void> {
+        const payload = {
+
+            "notrigger": 0
+        };
+
+        await lastValueFrom(
+
+            this.apiService.post(`/shipments/${shipmentId}/validate`, payload, { responseType: 'text' })
+        );
+    }
+
+    // --- Schritt 6 : Lieferschein abschließen ---
+    async closeShipment(shipmentId: string): Promise<void> {
+              const payload = {
+
+            "notrigger": 0
+        };
+        await lastValueFrom(
+            this.apiService.post(`/shipments/${shipmentId}/close`, payload, { responseType: 'text' })
+        );
+    }
+
+    //Lieferschein holen
+    async getShipment(shipmentId: string): Promise<any> {
+        return await lastValueFrom(this.apiService.get<any>(`/shipments/${shipmentId}`));
+    }
+    
+    //alle Lieferscheine holen
+    async getShipments(): Promise<any[]> {
+        return await lastValueFrom(this.apiService.get<any[]>(`/shipments`));
+    }
+    
     /**
-     * ROLLBACK: Löscht eine Rechnung (Entwurf), falls etwas schief geht.
+     * ROLLBACK: Löscht einen Auftrag (Entwurf), falls etwas schief geht.
      */
-    async deleteInvoice(invoiceId: string): Promise<void> {
+    async deleteOrder(orderId: string): Promise<void> {
         try {
-            await lastValueFrom(
-                this.apiService.delete(`/invoices/${invoiceId}`)
-            );
-            console.log(`Rollback erfolgreich: Rechnung ${invoiceId} gelöscht.`);
+            await lastValueFrom(this.apiService.delete(`/orders/${orderId}`));
+            console.log(`Rollback: Order ${orderId} gelöscht.`);
         } catch (e) {
-            console.error(`Rollback fehlgeschlagen für Rechnung ${invoiceId}`, e);
+            console.error(`Rollback fehlgeschlagen für Order ${orderId}`, e);
         }
-    }
-
-    private mapPaymentType(type: string): string {
-        const mapping: any = { 'cash': 4, 'delivery': 6, 'invoice': 2 };
-        return mapping[type] || 4;
-    }
-    async getInvoices(): Promise<any[]> {
-        const response = await lastValueFrom(this.apiService.get<any[]>('/invoices'));
-        return response;
     }
 }

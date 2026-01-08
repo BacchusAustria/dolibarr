@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { lastValueFrom } from 'rxjs'; 
+import { lastValueFrom } from 'rxjs';
 import { ApiService } from '../api.service';
 import { CartItem } from '../../models/cart.model';
 
@@ -8,7 +8,7 @@ export interface DolibarrInvoice {
     ref: string;
     total_ttc: string;
     date: number;
-    socname: string;
+    socid: string;
     paye: string; // "0" für offen, "1" für bezahlt
     status: string; // "3" für storniert
 }
@@ -79,6 +79,7 @@ export class InvoiceService {
 
     }
 
+
     /**
      * Zahlung buchen
      */
@@ -120,7 +121,13 @@ export class InvoiceService {
         return mapping[type] || 4;
     }
     async getInvoices(): Promise<any[]> {
-        const response = await lastValueFrom(this.apiService.get<any[]>('/invoices'));
+        const response = await lastValueFrom(this.apiService.get<any[]>('/invoices?limit=0'));
         return response;
     }
+    async getInvoiceById(id: string): Promise<DolibarrInvoice> {
+        const response = await lastValueFrom(this.apiService.get<DolibarrInvoice>(`/invoices/${id}`));
+        return response;
+    }
+
+
 }

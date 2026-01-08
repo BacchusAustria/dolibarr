@@ -37,8 +37,9 @@ export class CustomerSelectionComponent implements OnInit {
   public customers$: Observable<Customer[]>;
   public selectedCustomer$: Observable<Customer | null>;
   
-  // Output, um die App-Komponente zu informieren, dass die Auswahl abgeschlossen ist
+  // Output Events - die Komponente meldet nur Ereignisse nach oben, ändert nicht den globalen State
   @Output() close = new EventEmitter<void>();
+  @Output() customerSelect = new EventEmitter<Customer>();
 
   constructor(private customerService: CustomerService) {
     
@@ -75,11 +76,11 @@ export class CustomerSelectionComponent implements OnInit {
   }
 
   /**
-   * Wählt einen Kunden aus und delegiert die Zustandsänderung an den CustomerService.
+   * Wählt einen Kunden aus und meldet dies an die Eltern-Komponente.
+   * Die Entscheidung über die globale Zustandsänderung trifft die Eltern-Komponente.
    */
   public selectCustomer(customer: Customer): void {
-    this.customerService.setSelectedCustomer(customer);
-    // Optionale: Schließen der Ansicht nach Auswahl
+    this.customerSelect.emit(customer);
     this.close.emit();
   }
 }

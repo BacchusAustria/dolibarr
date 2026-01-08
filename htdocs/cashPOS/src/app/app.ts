@@ -20,7 +20,10 @@ import { PaymentComponent } from "./features/payment/payment.component";
 import { HeaderComponent } from "./components/header/header.component";
 import { LoginComponent } from "./features/login/login.component";
 import { InvoiceService } from './services/invoice/invoice.service';
+import { DeliveryService } from './services/delivery/delivery.service';
 import { InvoiceHistoryComponent } from './features/history/invoice-history.component';
+import { DocumentService } from './services/documents/document.service';
+import { PrintService } from './services/print/print.service';
 
 @Component({
   selector: 'app-root',
@@ -29,19 +32,23 @@ import { InvoiceHistoryComponent } from './features/history/invoice-history.comp
   templateUrl: './app.html',
   styleUrls: ['./app.css']
 })
+
 export class App implements OnInit, OnDestroy {
 
-  // NEU: Data Observables (Initialisierung im Constructor, um Fehler zu vermeiden)
   public readonly selectedCustomer$: Observable<Customer | null>;
   public readonly cartItems$: Observable<CartItem[]>;
   public readonly cartTotal$: Observable<number>;
+  
 
   constructor(
     private authService: AuthService,
     private productService: ProductService,
     private customerService: CustomerService,
     private invoiceService: InvoiceService,
-    private cartService: CartService
+    private deliveryService: DeliveryService,
+    private cartService: CartService,
+    private DocumentService: DocumentService,
+    private printService: PrintService,
   ) {
     // Initialisierung der Observables MUSS im Constructor erfolgen
     this.selectedCustomer$ = this.customerService.selectedCustomer$;
@@ -209,6 +216,14 @@ export class App implements OnInit, OnDestroy {
    */
   closeCustomerSelection() {
     this.currentView = 'main';
+  }
+
+  /**
+   * Handler für die Kundenauswahl aus der CustomerSelectionComponent.
+   * Setzt den ausgewählten Kunden im globalen CustomerService.
+   */
+  handleSaleCustomer(customer: Customer): void {
+    this.customerService.setSelectedCustomer(customer);
   }
 
   /**
@@ -426,39 +441,90 @@ export class App implements OnInit, OnDestroy {
 
   // Transaction
   async completeTransaction() {
-    const currentCustomer = this.customerService.getSelectedCustomer();
-    if (!currentCustomer) {
-      alert('Bitte wählen Sie einen Kunden aus, bevor Sie fortfahren.');
-      return;
+    // 1. Validierung
+    const items = this.cartService.getItems();
+    if (items.length === 0) {
+      alert('Warenkorb ist leer!');
+      return false;
     }
+
+    const customer = this.customerService.getSelectedCustomer();
+    if (!customer || !customer.id) {
+      alert('Kein Kunde ausgewählt! Bitte wählen Sie einen Kunden.');
+      return false;
+    }
+
+    // Für Lieferscheine sollte es meist nicht der anonyme "Barverkaufs-Kunde" sein
+    if (this.selectedPaymentType === 'delivery' && customer.name === 'AbHof Kunde') {
+      if (!confirm('Möchten Sie wirklich einen Lieferschein für den anonymen Kunden erstellen?')) {
+        return false;
+      }
+    }
+
+    const paidAmount = parseFloat(this.paymentAmount) || 0;
+
+    this.dataLoading = true; // Ladeindikator an
 
     try {
-      this.dataLoading = true;
+      console.log(`Starte Transaktion. Modus: ${this.selectedPaymentType}, Zahlung: ${this.selectedPaymentType}`);
 
-      // 1. Entwurf erstellen
-      const invoiceId = await this.invoiceService.createDraft(currentCustomer.id);
+      let docId = '';
 
-      // 2. Positionen hinzufügen
-      for (const item of this.cartItems) {
-        await this.invoiceService.addLine(invoiceId, item);
+      if (this.selectedPaymentType === 'delivery') {
+        // --- FALL A: LIEFERSCHEIN ---
+        // Hier nutzen wir unseren neuen "Full-Process" Service
+        docId = await this.deliveryService.createFullDeliveryProcess(customer.id, items);
+        alert(`Lieferschein erfolgreich erstellt! ID: ${docId}`);
+
+      } else {
+        // --- FALL B: RECHNUNG ---
+
+        // 1. Entwurf
+        docId = await this.invoiceService.createDraft(customer.id);
+
+        // 2. Zeilen hinzufügen
+        for (const item of items) {
+          await this.invoiceService.addLine(docId, item);
+        }
+
+        // 3. Validieren
+        await this.invoiceService.validate(docId);
+
+        // 4. Zahlung erfassen (Nur wenn nicht "Auf Rechnung" gewählt wurde)
+        if (this.selectedPaymentType !== 'invoice') {
+          await this.invoiceService.addPayment(docId, paidAmount, this.selectedPaymentType);
+        }
+
+
+        if (this.selectedPaymentType === 'cash' && this.printReceipt) {
+          //Rechnung abholen damit die Daten verwendet werden können
+          const invoice = await this.invoiceService.getInvoiceById(docId);
+          const base64Receipt = await this.printService.generateAndUploadReceipt(docId, invoice.ref, items, this.cartTotal, customer.name);
+
+          await this.DocumentService.uploadFile('invoice', invoice.ref, base64Receipt, `Kassenbeleg_${invoice.ref}.pdf`);;
+
+        }
+        const changeAmount = paidAmount - this.cartTotal;
+        const changeText = changeAmount > 0 ? `\nWechselgeld: ${changeAmount.toFixed(2)}€` : '';
+
+
+
+        alert(`Rechnung erfolgreich!${changeText}`);
       }
 
-      // 3. Validieren
-      await this.invoiceService.validate(invoiceId);
-
-      // 4. Zahlung
-      await this.invoiceService.addPayment(invoiceId, this.cartTotal, this.selectedPaymentType);
-
-      alert('Transaktion erfolgreich abgeschlossen!');
+      // Abschluss: Warenkorb leeren und zurücksetzen
       this.resetCart();
       this.currentView = 'main';
+      this.selectedPaymentType = 'invoice'; // Reset auf Standard
 
-    } catch (error) {
-      console.error("Fehler beim Abschluss:", error);
-      alert("Die Transaktion konnte nicht abgeschlossen werden.");
+      return true;
+
+    } catch (error: any) {
+      console.error('Transaction error:', error);
+      alert('Fehler bei der Transaktion: ' + (error.message || error));
+      return false;
     } finally {
-      this.dataLoading = false;
+      this.dataLoading = false; // Ladeindikator aus
     }
   }
-
 }

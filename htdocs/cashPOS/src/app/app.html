@@ -12,7 +12,9 @@
     }
 
     @if (currentView === 'customer') {
-    <app-customer-selection (close)="closeCustomerSelection()"
+    <app-customer-selection 
+      (customerSelect)="handleSaleCustomer($event)"
+      (close)="closeCustomerSelection()"
       class="absolute inset-0 z-20 bg-white"></app-customer-selection>
     }
 
