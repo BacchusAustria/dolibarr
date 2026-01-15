@@ -91,7 +91,7 @@ export class DeliveryService {
         };
 
         await lastValueFrom(
-            this.apiService.post(`/orders/${orderId}/lines`, payload, { responseType: 'text' })
+            this.apiService.post(`/orders/${orderId}/lines`, payload, { responseType: 'json' })
         );
     }
 
@@ -100,7 +100,7 @@ export class DeliveryService {
     async validateOrder(orderId: string): Promise<void> {
         // idwarehouse: '1' könnte hier übergeben werden, um Lager für Reservierung zu setzen
         await lastValueFrom(
-            this.apiService.post(`/orders/${orderId}/validate`, { idwarehouse: '1' }, { responseType: 'text' })
+            this.apiService.post(`/orders/${orderId}/validate`, { idwarehouse: '1' }, { responseType: 'json' })
         );
     }
 
@@ -149,7 +149,7 @@ export class DeliveryService {
 
         await lastValueFrom(
 
-            this.apiService.post(`/shipments/${shipmentId}/validate`, payload, { responseType: 'text' })
+            this.apiService.post(`/shipments/${shipmentId}/validate`, payload, { responseType: 'json' })
         );
     }
 
@@ -160,7 +160,7 @@ export class DeliveryService {
             "notrigger": 0
         };
         await lastValueFrom(
-            this.apiService.post(`/shipments/${shipmentId}/close`, payload, { responseType: 'text' })
+            this.apiService.post(`/shipments/${shipmentId}/close`, payload, { responseType: 'json' })
         );
     }
 

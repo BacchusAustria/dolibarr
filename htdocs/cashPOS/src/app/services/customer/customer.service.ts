@@ -1,34 +1,48 @@
-// src/app/services/customer/customer.service.ts
-import { Injectable } from '@angular/core';
-import { BehaviorSubject, firstValueFrom, Observable } from 'rxjs';
+import { Injectable, signal, inject, WritableSignal } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 import { Customer } from '../../models/customer.model';
 import { ApiService } from '../api.service';
-// Annahme: MOCK_DATA ist für die Demo vorhanden
 
 @Injectable({
   providedIn: 'root',
 })
 export class CustomerService {
+  private apiService = inject(ApiService);
+
+  // **********************************************
+  // ** STATE (SIGNALS) **
+  // **********************************************
   
-  private _customers = new BehaviorSubject<Customer[]>([]);
-  public readonly customers$: Observable<Customer[]> = this._customers.asObservable();
+  // Ersetzt BehaviorSubject<Customer[]>
+  public customers: WritableSignal<Customer[]> = signal<Customer[]>([]);
+  
+  // Ersetzt BehaviorSubject<Customer | null>
+  public selectedCustomer: WritableSignal<Customer | null> = signal<Customer | null>(null);
 
-  private _selectedCustomer = new BehaviorSubject<Customer | null>(null);
-  public readonly selectedCustomer$: Observable<Customer | null> = this._selectedCustomer.asObservable();
+  constructor() {}
 
-  constructor(private apiService: ApiService) {}
+  // **********************************************
+  // ** ACTIONS **
+  // **********************************************
 
   public async loadCustomers(): Promise<void> {
-    if (this._customers.getValue().length > 0) return;
+    // Einfaches Caching: Wenn schon Daten da sind, nicht neu laden
+    if (this.customers().length > 0) return;
 
     try {
-      const customers =  await firstValueFrom(this.apiService.get<Customer[]>('/thirdparties'));
-      this._customers.next(customers);
-      // Setzt den Standardkunden nach dem Laden
+      const customers = await firstValueFrom(this.apiService.get<Customer[]>('/thirdparties'));
+      
+      // 1. Signal setzen
+      this.customers.set(customers);
+
+      // 2. Standardkunden suchen und setzen
       const defaultCustomer = customers.find(c => c.name === 'AbHof Kunde');
-      // Setzt den Standardkunden nach dem Laden, falls gefunden
+      
       if (defaultCustomer) {
-        this.setSelectedCustomer(defaultCustomer);
+        this.selectedCustomer.set(defaultCustomer);
+      } else if (customers.length > 0) {
+        // Fallback: Ersten Kunden nehmen, falls 'AbHof' nicht existiert (optional)
+        // this.selectedCustomer.set(customers[0]);
       }
       
     } catch (error) {
@@ -36,14 +50,14 @@ export class CustomerService {
       throw error;
     }
   }
-public getCustomers(): Customer[] {
-      return this._customers.getValue();
-  }
-  public setSelectedCustomer(customer: Customer) {
-    this._selectedCustomer.next(customer);
+
+  public setSelectedCustomer(customer: Customer): void {
+    this.selectedCustomer.set(customer);
   }
 
-  public getSelectedCustomer(): Customer | null {
-    return this._selectedCustomer.getValue();
+  // Getter sind nicht mehr nötig, da man direkt service.customers() aufrufen kann.
+  // Falls du Logik brauchst, um einen Kunden per ID zu finden:
+  public getCustomerById(id: string): Customer | undefined {
+    return this.customers().find(c => c.id === id);
   }
 }

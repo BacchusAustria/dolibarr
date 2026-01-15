@@ -34,6 +34,7 @@ export class PaymentComponent {
   @Output() completeTransaction = new EventEmitter<void>();
   @Output() cancel = new EventEmitter<void>();
   
+
   // Zahlungsoptionen zur einfachen Iteration
   readonly paymentOptions = [
     {

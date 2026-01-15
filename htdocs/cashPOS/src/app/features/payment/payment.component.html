@@ -52,7 +52,7 @@
 }
     </div>
 
-    <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+    <div *ngIf="selectedPaymentType==='cash'" class = "bg-white p-4 rounded-xl shadow-sm border border-gray-100">
       <label class="block text-sm font-medium text-gray-600 mb-2">
         Gegebener Betrag
       </label>

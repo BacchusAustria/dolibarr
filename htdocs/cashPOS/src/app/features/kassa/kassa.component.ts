@@ -1,7 +1,7 @@
-import { Component, OnInit } from '@angular/core';
-import { CommonModule, AsyncPipe } from '@angular/common';
+// src/app/features/kassa/kassa.component.ts
+import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { BehaviorSubject, combineLatest, map, Observable, startWith, debounceTime, distinctUntilChanged, take } from 'rxjs';
 
 // Services
 import { ProductService } from '../../services/product/product.service';
@@ -14,7 +14,7 @@ import { Category } from '../../models/category.model';
 import { CartItem } from '../../models/cart.model';
 import { Discount } from '../../models/discount.model';
 
-// Utilities
+// Utils
 import { PriceUtils } from '../../utils/price.utils';
 
 // UI Components
@@ -26,230 +26,203 @@ import { ProductModalComponent, TempProduct } from '../../components/modals/prod
 @Component({
   selector: 'app-kassa',
   standalone: true,
-  imports: [CommonModule, FormsModule, AsyncPipe, CategoryNavigationComponent, ProductGridComponent, CartListComponent, ProductModalComponent],
+  imports: [
+    CommonModule, 
+    FormsModule, 
+    CategoryNavigationComponent, 
+    ProductGridComponent, 
+    CartListComponent, 
+    ProductModalComponent
+  ],
   templateUrl: './kassa.component.html',
   styleUrls: ['./kassa.component.css']
 })
 export class KassaComponent implements OnInit {
-  editingIndex: number | null = null; 
-
-  private _searchTermSubject = new BehaviorSubject<string>('');
-  private _selectedCategorySubject = new BehaviorSubject<string | null>(null);
-
-  private readonly allCategories$: Observable<Category[]>;
-
-  public readonly filteredProducts$: Observable<Product[]>;
-  public readonly categoryPath$: Observable<Array<{ id: string; name: string }>>;
-  public readonly availableSubCategories$: Observable<Category[]>; 
-
-  public readonly cartItems$: Observable<CartItem[]>;
-  public readonly subtotal$: Observable<number>;
-  public readonly globalDiscountAmount$: Observable<number>;
-  public readonly cartTotal$: Observable<number>;
-
-  isCartExpanded: boolean = false;
-
-  get searchTerm(): string { return this._searchTermSubject.getValue(); }
-  set searchTerm(value: string) { this._searchTermSubject.next(value); }
-
-  get selectedCategory(): string | null { return this._selectedCategorySubject.getValue(); }
-
-  // Modals
-  productModal: Product | null = null;
-  tempProduct: TempProduct = { quantity: 1, price: 0, discount: { value: 0, type: 'percent' } }; // Vorübergehende Speicherung für Modal
-  discountModal: { type: 'item' | 'global', index: number | null, value: number, discountType: 'percent' | 'euro' } | null = null;
-  longPressTimer: number | null = null;
-  openEditModal(index: number): void {
-    const item = this.cartService.getItems()[index];
-    if (!item) return;
-    this.editingIndex = null;
-    this.editingIndex = index;
-    this.productModal = { ...item } as any;
-    this.tempProduct = {
-      quantity: item.quantity,
-      price: item.price,
-      discount: item.discount || { value: 0, type: 'percent' } // Rabatt hinzufügen
-    };
-  }
-
-  // Diese Methode wird aufgerufen, wenn im Modal "Speichern" gedrückt wird
-  saveCartItemChanges(): void {
-    if (this.editingIndex !== null) {
-      this.cartService.updateItem(this.editingIndex, {
-        quantity: this.tempProduct.quantity,
-        price: this.tempProduct.price,
-        discount: (this.tempProduct as any).discount // Falls Interface erweitert
-      });
-      this.closeProductModal();
-    }
-  }
-
-  deleteItemFromModal(): void {
-    if (this.editingIndex !== null) {
-      this.cartService.removeItem(this.editingIndex);
-      this.closeProductModal();
-    }
-  }
-  constructor(
-    private productService: ProductService,
-    private cartService: CartService,
-    private customerService: CustomerService
-  ) {
-
-    this.allCategories$ = this.productService.categories$;
-
-    // 1. Warenkorb-Observables (Delegation an CartService)
-    this.cartItems$ = this.cartService.cartItems$;
-    this.subtotal$ = this.cartService.subtotal$;
-    this.globalDiscountAmount$ = this.cartService.globalDiscountAmount$;
-    this.cartTotal$ = this.cartService.cartTotal$;
-
-    // 2. Produktfilter-Observables
-    this.filteredProducts$ = combineLatest([
-      this.productService.products$,
-      this._searchTermSubject.pipe(debounceTime(300), distinctUntilChanged(), startWith(this.searchTerm)),
-      this._selectedCategorySubject.pipe(startWith(this.selectedCategory)),
-      this.allCategories$
-    ]).pipe(
-      map(([products, term, categoryId, categories]) => this.getFilteredProducts(categories, products, term, categoryId))
-    );
-
-    // 3. Kategoriepfad-Observable
-    this.categoryPath$ = combineLatest([
-      this.allCategories$, // Verwendet das korrekte, initialisierte Observable
-      this._selectedCategorySubject.pipe(startWith(this.selectedCategory))
-    ]).pipe(
-      map(([categories, currentId]) => this.buildCategoryPath(categories, currentId))
-    );
-
-    // 4. Verfügbare Unterkategorien für die Navigation
-    this.availableSubCategories$ = combineLatest([
-      this.allCategories$, // Verwendet das korrekte, initialisierte Observable
-      this._selectedCategorySubject.asObservable()
-    ]).pipe(
-      map(([categories, selectedId]) => {
-        const subCategories = categories.filter(c => {
-          // Verwenden von String(c.fk_parent) für konsistente ID-Vergleiche
-          const parentId = c.fk_parent ? String(c.fk_parent) : null;
-
-          // Root level: fk_parent muss null oder '0' sein
-          if (selectedId === null) {
-            return parentId === null || parentId === '0';
-          }
-
-          // Sub-level: fk_parent muss selectedId entsprechen
-          return parentId === selectedId;
-        });
-
-        // Sortiert nach Label (Dolibarr-Feldname)
-        return subCategories.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
-      })
-    );
-  }
-
-  ngOnInit() {
-    this.productService.loadProducts();
-    this.productService.loadCategories();
-  }
+  
+  // **********************************************
+  // ** DEPENDENCY INJECTION **
+  // **********************************************
+  private productService = inject(ProductService);
+  public cartService = inject(CartService); // Public für Zugriff im Template
+  public customerService = inject(CustomerService);
 
   // **********************************************
-  // ** PREIS-UTILITY **
+  // ** LOKALER UI-STATE (SIGNALS) **
+  // **********************************************
+  public searchTerm = signal<string>('');
+  public selectedCategoryId = signal<string | null>(null);
+  public isCartExpanded = signal<boolean>(false);
+  
+  // Modal State Signals
+  public productModal = signal<Product | null>(null);
+  public editingIndex = signal<number | null>(null);
+  
+  // Helper State (Non-Signal, da mutable Objekt für Modal-Forms)
+  public tempProduct: TempProduct = { quantity: 1, price: 0, discount: { value: 0, type: 'percent' } };
+  public discountModal: { type: 'item' | 'global', index: number | null, value: number, discountType: 'percent' | 'euro' } | null = null;
+  private longPressTimer: any = null;
+
+  // **********************************************
+  // ** SERVICE DATEN (SIGNALS) **
+  // **********************************************
+  // Wir greifen direkt auf die Signals im ProductService zu
+  private products = this.productService.products; 
+  private categories = this.productService.categories;
+
+  // **********************************************
+  // ** COMPUTED SIGNALS (LOGIK) **
   // **********************************************
 
-  public getPriceForProduct(product: Product): number {
-    const priceLevelKey = '2';
-    return PriceUtils.getPriceForProduct(product, priceLevelKey);
-  }
+  /**
+   * Filtert Produkte basierend auf Kategorie-Auswahl und Suchbegriff.
+   */
+  public filteredProducts = computed(() => {
+    let filtered = this.products();
+    const catId = this.selectedCategoryId();
+    const term = this.searchTerm().toLowerCase();
 
-  // **********************************************
-  // ** KATEGORIE-LOGIK **
-  // **********************************************
-
-  public navigateToCategory(categoryId: string | null): void {
-    this._selectedCategorySubject.next(categoryId);
-    this.searchTerm = '';
-    this._searchTermSubject.next(''); // Suchbegriff zurücksetzen
-  }
-
-  toggleCart(): void {
-    this.isCartExpanded = !this.isCartExpanded;
-  }
-
-  public navigateBack(): void {
-    const currentId = this._selectedCategorySubject.getValue();
-    if (!currentId) return;
-
-    this.allCategories$.pipe(
-      map(categories => {
-        const currentCategory = categories.find(c => c.id === currentId);
-        return currentCategory?.fk_parent ? String(currentCategory.fk_parent) : null;
-      }),
-      take(1)
-    ).subscribe(parentId => {
-      this.navigateToCategory(parentId);
-    });
-  }
-
-  private buildCategoryPath(categories: Category[], currentCategoryId: string | null): Array<{ id: string; name: string }> {
-    const path: Array<{ id: string; name: string }> = [];
-    let currentId: string | null = currentCategoryId;
-
-    while (currentId !== null) {
-      const category = categories.find(cat => cat.id === currentId);
-      if (category) {
-        path.unshift({ id: category.id, name: category.label });
-        currentId = String(category.fk_parent) || null;
-      } else {
-        break;
-      }
-    }
-    return path;
-  }
-
-  private getAllSubCategoryIds(categoryId: string, allCategories: Category[]): string[] {
-    let ids = [categoryId];
-    const children = allCategories.filter(c => c.fk_parent !== undefined &&
-      c.fk_parent !== null &&
-      c.fk_parent.toString() === categoryId);
-    for (const child of children) {
-      ids = [...ids, ...this.getAllSubCategoryIds(child.id, allCategories)];
-    }
-    return ids;
-  }
-  private getFilteredProducts(categories: Category[], products: Product[], searchTerm: string, categoryId: string | null): Product[] {
-    let filtered = products;
-
-    if (categoryId) {
-      const targetCategoryIds = this.getAllSubCategoryIds(categoryId, categories);
-      filtered = filtered.filter(p =>
+    // 1. Kategorie Filter (inkl. Unterkategorien)
+    if (catId) {
+      const targetCategoryIds = this.getAllSubCategoryIds(catId, this.categories());
+      filtered = filtered.filter(p => 
         p.categories?.some(c => targetCategoryIds.includes(c.id))
       );
     }
 
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(p =>
+    // 2. Suchbegriff Filter
+    if (term) {
+      filtered = filtered.filter(p => 
         p.label.toLowerCase().includes(term) || p.ref.toLowerCase().includes(term)
       );
     }
 
     return filtered;
+  });
+
+  /**
+   * Berechnet den aktuellen Kategorie-Pfad (Breadcrumbs).
+   */
+  public categoryPath = computed(() => {
+    const path: Array<{ id: string; name: string }> = [];
+    let currentId = this.selectedCategoryId();
+    const allCats = this.categories();
+
+    while (currentId) {
+      const cat = allCats.find(c => c.id === currentId);
+      if (!cat) break;
+      path.unshift({ id: cat.id, name: cat.label });
+      currentId = cat.fk_parent ? String(cat.fk_parent) : null;
+    }
+    return path;
+  });
+
+  /**
+   * Liefert die verfügbaren Unterkategorien für die aktuelle Ansicht.
+   */
+  public availableSubCategories = computed(() => {
+    const selectedId = this.selectedCategoryId();
+    return this.categories()
+      .filter(c => {
+        const parentId = c.fk_parent ? String(c.fk_parent) : null;
+        // Wenn keine Kategorie gewählt: Zeige Root-Kategorien (parent ist null oder '0')
+        if (selectedId === null) {
+          return parentId === null || parentId === '0';
+        }
+        // Sonst: Zeige Kinder der gewählten Kategorie
+        return parentId === selectedId;
+      })
+      .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+  });
+
+  // **********************************************
+  // ** LIFECYCLE **
+  // **********************************************
+
+  ngOnInit() {
+    // Initiale Daten laden
+    this.productService.loadProducts();
+    this.productService.loadCategories();
+    this.customerService.loadCustomers();
   }
 
   // **********************************************
-  // ** WARENKORB-AKTIONEN **
+  // ** UI INTERAKTIONEN **
   // **********************************************
 
-  addToCart(product: Product, quantity: number = 1, customPrice?: number, discount?: Discount): void {
+  /**
+   * Klappt den Warenkorb auf oder zu.
+   */
+  toggleCart(): void {
+    this.isCartExpanded.update(val => !val);
+  }
+
+  public navigateToCategory(id: string | null): void {
+    this.selectedCategoryId.set(id);
+    this.searchTerm.set(''); // Suche zurücksetzen beim Navigieren
+  }
+
+  public navigateBack(): void {
+    const currentId = this.selectedCategoryId();
+    if (!currentId) return;
+    
+    // Parent ID finden
+    const cat = this.categories().find(c => c.id === currentId);
+    this.navigateToCategory(cat?.fk_parent ? String(cat.fk_parent) : null);
+  }
+
+  // Hilfsmethode für das Template, um Zeilensummen zu berechnen
+  public calculateItemTotal = (item: CartItem): number => {
+    return this.cartService.calculateItemTotal(item);
+  };
+
+  // **********************************************
+  // ** WARENKORB & MODAL LOGIK **
+  // **********************************************
+
+
+  public removeFromCart(index: number): void {
+    this.cartService.removeItem(index);
+  }
+
+  public updateItemQuantity(event: { index: number, quantity: number }): void {
+    this.cartService.updateAmount(event.index, event.quantity);
+  }
+
+  /**
+   * Öffnet das Bearbeiten-Modal für ein existierendes Warenkorb-Item.
+   */
+  public openEditModal(index: number): void {
+    const item = this.cartService.items()[index];
+    if (!item) return;
+
+    this.editingIndex.set(index);
+    this.productModal.set({ ...item } as Product); // Casten, da CartItem extends Product
+    
+    // Temp-State für das Formular initialisieren
+    this.tempProduct = {
+      quantity: item.quantity,
+      price: item.price,
+      discount: { ...item.discount }
+    };
+  }
+public getPriceForProduct(product: Product): number {
+    return PriceUtils.getPriceForProduct(product);
+  }
+  public addToCart(product: Product, quantity: number = 1, customPrice?: number, discount?: Discount): void {
+    // 1. Preis exakt wie im Original ermitteln
     const price = customPrice ?? this.getPriceForProduct(product);
+
+    // 2. Explizites Mapping aller Felder (WICHTIG für Invoice/Dolibarr)
     const item: CartItem = {
       id: product.id,
       label: product.label,
       quantity: quantity,
-      price: customPrice || price,
-      discount: discount ?? { value: 0, type: 'percent' }, 
+      price: price, // Der ermittelte Preis (Level 2 oder Custom)
+      discount: discount ?? { value: 0, type: 'percent' },
       custom_price: customPrice !== undefined,
-      originalPrice: price,
+      originalPrice: this.getPriceForProduct(product), // Basispreis merken
+      
+      // Technische Felder für Backend/Transaktion
       description: product.description,
       ref: product.ref,
       price_ttc: product.price_ttc,
@@ -261,100 +234,81 @@ export class KassaComponent implements OnInit {
       fk_default_bom: product.fk_default_bom,
       date_update: product.date_update
     };
-    this.cartService.addItemFromGrid(item);
+    this.cartService.addItemFromGrid(item); 
   }
 
-  addProductFromModal(): void {
-    if (this.productModal) {
-      // Wenn wir einen bestehenden Artikel bearbeiten (aus Langdruck auf bestehendem Artikel)
-      if (this.editingIndex !== null && this.editingIndex >= 0) {
-        this.saveCartItemChanges();
-        return;
-      }
+  /**
+   * Modal-Logik korrigiert: Baut das Item lokal zusammen statt
+   * add + update nacheinander aufzurufen.
+   */
+  public addProductFromModal(): void {
+    const product = this.productModal();
+    if (!product) return;
+    if (this.editingIndex() !== null) {
+      this.saveCartItemChanges();
+      return;
+    }
+    const standardPrice = this.getPriceForProduct(product);
+    const isCustomPrice = this.tempProduct.price !== standardPrice;
 
-      // Ansonsten fügen wir einen neuen Artikel hinzu
-      const cartItem: CartItem = {
-        id: this.productModal.id,
-        label: this.productModal.label,
+    this.addToCart(
+      product, 
+      this.tempProduct.quantity, 
+      isCustomPrice ? this.tempProduct.price : undefined,
+      this.tempProduct.discount
+    );
+
+    this.closeProductModal();
+  }
+
+  public saveCartItemChanges(): void {
+    const index = this.editingIndex();
+    if (index !== null) {
+      this.cartService.updateItem(index, {
         quantity: this.tempProduct.quantity,
         price: this.tempProduct.price,
-        discount: this.tempProduct.discount ?? { value: 0, type: 'percent' },
-        custom_price: this.tempProduct.price !== this.getPriceForProduct(this.productModal),
-        originalPrice: this.getPriceForProduct(this.productModal),
-        description: this.productModal.description,
-        ref: this.productModal.ref,
-        price_ttc: this.productModal.price_ttc,
-        tva_tx: this.productModal.tva_tx,
-        price_base_type: this.productModal.price_base_type,
-        status: this.productModal.status,
-        type: this.productModal.type,
-        stock_reel: this.productModal.stock_reel,
-        fk_default_bom: this.productModal.fk_default_bom,
-        date_update: this.productModal.date_update
-      };
-      this.cartService.addItem(cartItem, true);
+        discount: this.tempProduct.discount
+      });
       this.closeProductModal();
     }
   }
 
-  removeFromCart(index: number): void {
-    this.cartService.removeItem(index);
-  }
-
-  updateItemQuantity(event: { index: number, quantity: number }): void {
-    this.cartService.updateAmount(event.index, event.quantity);
-  }
-
-  updateItemPrice(event: { index: number, price: number }): void {
-    this.cartService.updateItem(event.index, {
-      price: event.price,
-      custom_price: true
-    });
-  }
-
-  updateItemDiscount(event: { index: number, discount: Discount }): void {
-    this.cartService.setItemDiscount(event.index, event.discount);
-  }
-
-
-  public calculateItemTotal = (item: CartItem): number => {
-    return this.cartService.calculateItemTotal(item);
-  };
-
-  updateTempProduct(newValues: TempProduct): void {
-    this.tempProduct = {
-      quantity: newValues.quantity,
-      price: newValues.price,
-      discount: newValues.discount ? newValues.discount : {
-        value: 0, type: 'percent'
-      }
+  public deleteItemFromModal(): void {
+    const index = this.editingIndex();
+    if (index !== null) {
+      this.cartService.removeItem(index);
+      this.closeProductModal();
     }
   }
+
+  public closeProductModal(): void {
+    this.productModal.set(null);
+    this.editingIndex.set(null);
+  }
+
+  public updateTempProduct(newValues: TempProduct): void {
+    this.tempProduct = newValues;
+  }
+
   // **********************************************
-  // ** LONG-PRESS / MODAL LOGIK **
+  // ** LONG PRESS LOGIK **
   // **********************************************
 
   handleLongPressStart(product: Product): void {
-    this.longPressTimer = window.setTimeout(() => {
-      this.productModal = product;
-      
-      // Prüfe, ob das Produkt bereits im Warenkorb ist
+    this.longPressTimer = setTimeout(() => {
       const cartItem = this.cartService.findItemByProductId(product.id);
       
       if (cartItem) {
-        // Produkt ist im Warenkorb: Lade Daten aus dem CartItem
-        this.editingIndex = this.cartService.getItems().indexOf(cartItem);
-        this.tempProduct = {
-          quantity: cartItem.quantity,
-          price: cartItem.price,
-          discount: cartItem.discount || { value: 0, type: 'percent' }
-        };
+        // Item ist schon im Warenkorb -> Edit Mode
+        const index = this.cartService.items().indexOf(cartItem);
+        this.openEditModal(index);
       } else {
-        // Produkt ist nicht im Warenkorb: Verwende Standardwerte
-        this.editingIndex = null;
+        // Neues Item -> Add Mode mit Modal
+        this.editingIndex.set(null);
+        this.productModal.set(product);
         this.tempProduct = {
           quantity: 1,
-          price: this.getPriceForProduct(product),
+          price: PriceUtils.getPriceForProduct(product),
           discount: { value: 0, type: 'percent' }
         };
       }
@@ -365,48 +319,41 @@ export class KassaComponent implements OnInit {
     if (this.longPressTimer) {
       clearTimeout(this.longPressTimer);
       this.longPressTimer = null;
-      if (!this.productModal) {
+      // Nur wenn das Modal noch NICHT offen ist, war es ein kurzer Klick -> Add to Cart
+      if (!this.productModal()) {
         this.addToCart(product);
       }
     }
   }
 
-  closeProductModal(): void {
-    this.productModal = null;
-  }
-
-
   // **********************************************
-  // ** RABATT-LOGIK **
+  // ** RABATT MODAL LOGIK **
   // **********************************************
 
-  openDiscountModalFromCart(event: { type: 'item' | 'global', index?: number }): void {
+  public openDiscountModalFromCart(event: { type: 'item' | 'global', index?: number }): void {
     this.openDiscountModal(event.type, event.index);
   }
 
-  openDiscountModal(type: 'item' | 'global', index?: number | null): void {
+  public openDiscountModal(type: 'item' | 'global', index?: number | null): void {
     let currentDiscount: Discount;
 
     if (type === 'global') {
-      currentDiscount = this.cartService.getGlobalDiscount();
+      currentDiscount = this.cartService.globalDiscount();
       index = null;
     } else {
-      if (typeof index !== 'number' || index === null) {
-        console.error("Rabatt kann nicht für 'item' ohne Index geöffnet werden.");
-        return;
-      }
-      currentDiscount = this.cartService.getItems()[index]?.discount || { value: 0, type: 'percent' };
+      if (typeof index !== 'number') return;
+      currentDiscount = this.cartService.items()[index]?.discount || { value: 0, type: 'percent' };
     }
 
     this.discountModal = {
       type: type,
-      index: index,
+      index: index ?? null,
       value: currentDiscount.value,
       discountType: currentDiscount.type
     };
   }
 
-  applyDiscount(): void {
+  public applyDiscount(): void {
     if (!this.discountModal) return;
 
     const discount: Discount = {
@@ -417,9 +364,24 @@ export class KassaComponent implements OnInit {
     if (this.discountModal.type === 'global') {
       this.cartService.setGlobalDiscount(discount);
     } else if (this.discountModal.type === 'item' && this.discountModal.index !== null) {
-      this.cartService.setItemDiscount(this.discountModal.index, discount);
+      this.cartService.updateItem(this.discountModal.index, { discount: discount });
     }
+    
     this.discountModal = null;
   }
 
+  // **********************************************
+  // ** HELPER **
+  // **********************************************
+
+  private getAllSubCategoryIds(categoryId: string, allCategories: Category[]): string[] {
+    let ids = [categoryId];
+    // String Konvertierung für sicheren Vergleich
+    const children = allCategories.filter(c => c.fk_parent && String(c.fk_parent) === categoryId);
+    
+    for (const child of children) {
+      ids = [...ids, ...this.getAllSubCategoryIds(child.id, allCategories)];
+    }
+    return ids;
+  }
 }

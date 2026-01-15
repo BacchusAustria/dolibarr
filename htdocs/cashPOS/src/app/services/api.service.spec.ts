@@ -1,3 +1,4 @@
+// src/app/services/api.service.spec.ts
 import { TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { ApiService } from './api.service';
@@ -5,6 +6,7 @@ import { ApiService } from './api.service';
 describe('ApiService', () => {
   let service: ApiService;
   let httpMock: HttpTestingController;
+  const baseUrl = 'https://mittermayer.bplaced.net/dolibarr/htdocs/api/index.php';
 
   beforeEach(() => {
     TestBed.configureTestingModule({
@@ -17,20 +19,12 @@ describe('ApiService', () => {
   });
 
   afterEach(() => {
+    // Verstellt sicher, dass keine Requests offen geblieben sind
     httpMock.verify();
   });
 
   it('should be created', () => {
     expect(service).toBeTruthy();
-  });
-
-  describe('setApiUrl', () => {
-    it('should set the API URL', () => {
-      const newUrl = 'https://api.example.com';
-      service.setApiUrl(newUrl);
-      // Service should now use this URL for requests
-      expect(service).toBeTruthy();
-    });
   });
 
   describe('get', () => {
@@ -41,7 +35,7 @@ describe('ApiService', () => {
         expect(data).toEqual(mockData);
       });
 
-      const req = httpMock.expectOne('/api/products/1');
+      const req = httpMock.expectOne(`${baseUrl}/products/1`);
       expect(req.request.method).toBe('GET');
       req.flush(mockData);
     });
@@ -54,9 +48,11 @@ describe('ApiService', () => {
         expect(data).toEqual(mockData);
       });
 
-      const req = httpMock.expectOne(req => 
-        req.url === '/api/products' && 
-        req.params.get('category') === 'electronics'
+      // Überprüfung inklusive Query-Strings
+      const req = httpMock.expectOne(request => 
+        request.url === `${baseUrl}/products` && 
+        request.params.get('category') === 'electronics' &&
+        request.params.get('limit') === '10'
       );
       expect(req.request.method).toBe('GET');
       req.flush(mockData);
@@ -64,7 +60,7 @@ describe('ApiService', () => {
   });
 
   describe('post', () => {
-    it('should perform a POST request', () => {
+    it('should perform a POST request and force responseType json', () => {
       const payload = { name: 'New Product', price: 99.99 };
       const mockResponse = { id: 1, ...payload };
 
@@ -72,9 +68,10 @@ describe('ApiService', () => {
         expect(data).toEqual(mockResponse);
       });
 
-      const req = httpMock.expectOne('/api/products');
+      const req = httpMock.expectOne(`${baseUrl}/products`);
       expect(req.request.method).toBe('POST');
       expect(req.request.body).toEqual(payload);
+      expect(req.request.responseType).toBe('json');
       req.flush(mockResponse);
     });
   });
@@ -88,24 +85,8 @@ describe('ApiService', () => {
         expect(data).toEqual(mockResponse);
       });
 
-      const req = httpMock.expectOne('/api/products/1');
+      const req = httpMock.expectOne(`${baseUrl}/products/1`);
       expect(req.request.method).toBe('PUT');
-      expect(req.request.body).toEqual(payload);
-      req.flush(mockResponse);
-    });
-  });
-
-  describe('patch', () => {
-    it('should perform a PATCH request', () => {
-      const payload = { price: 129.99 };
-      const mockResponse = { id: 1, name: 'Product', ...payload };
-
-      service.patch('/products/1', payload).subscribe(data => {
-        expect(data).toEqual(mockResponse);
-      });
-
-      const req = httpMock.expectOne('/api/products/1');
-      expect(req.request.method).toBe('PATCH');
       expect(req.request.body).toEqual(payload);
       req.flush(mockResponse);
     });
@@ -119,9 +100,39 @@ describe('ApiService', () => {
         expect(data).toEqual(mockResponse);
       });
 
-      const req = httpMock.expectOne('/api/products/1');
+      const req = httpMock.expectOne(`${baseUrl}/products/1`);
       expect(req.request.method).toBe('DELETE');
       req.flush(mockResponse);
+    });
+  });
+
+  describe('getBlob', () => {
+    it('should request a blob for files', () => {
+      const mockBlob = new Blob(['pdf-content'], { type: 'application/pdf' });
+
+      service.getBlob('/documents/1').subscribe(data => {
+        expect(data instanceof Blob).toBe(true);
+        expect(data.size).toBeGreaterThan(0);
+      });
+
+      const req = httpMock.expectOne(`${baseUrl}/documents/1`);
+      expect(req.request.responseType).toBe('blob');
+      req.flush(mockBlob);
+    });
+  });
+
+  describe('Error Handling', () => {
+    it('should handle server errors correctly', () => {
+      const errorMessage = 'Internal Server Error';
+
+      service.get('/error').subscribe({
+        error: (err) => {
+          expect(err.message).toContain('Server-Fehler: 500');
+        }
+      });
+
+      const req = httpMock.expectOne(`${baseUrl}/error`);
+      req.flush({ message: errorMessage }, { status: 500, statusText: 'Server Error' });
     });
   });
 });

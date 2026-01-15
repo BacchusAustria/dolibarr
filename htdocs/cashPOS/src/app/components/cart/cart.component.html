@@ -6,40 +6,91 @@
       </svg>
       <h2 class="font-semibold text-[#828f9a]">Warenkorb</h2>
     </div>
+    <span class="bg-[#828f9a] text-white text-xs px-2 py-0.5 rounded-full">
+      {{ cart.itemCount() }} Pos.
+    </span>
   </div>
 
   <div class="overflow-y-auto max-h-64">
-    <div *ngIf="(cart.cartItems$ | async)?.length === 0" class="p-8 text-center text-gray-400">
-      <p>Warenkorb leer</p>
-    </div>
-
-    <ng-template #emptyCart>
+    @if (cart.items().length === 0) {
       <div class="p-8 text-center text-gray-400">
         <p>Warenkorb leer</p>
       </div>
-    </ng-template>
+    } @else {
+      <div class="divide-y">
+        @for (item of cart.items(); track item.id; let i = $index) {
+          <div class="p-3 hover:bg-gray-50">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start space-x-2 flex-1">
+                <div class="text-2xl">📦</div>
+                <div class="flex-1">
+                  <div class="font-medium text-sm">{{ item.label }}</div>
+                  
+                  <div class="flex items-center space-x-2 mt-2">
+                    <button (click)="cart.updateItem(i, {quantity: item.quantity - 1})" 
+                            class="p-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+                            [disabled]="item.quantity <= 1">
+                      -
+                    </button>
+                    
+                    <span class="font-medium min-w-[1.5rem] text-center text-sm">{{ item.quantity }}</span>
+                    
+                    <button (click)="cart.updateItem(i, {quantity: item.quantity + 1})" 
+                            class="p-1 bg-gray-200 rounded hover:bg-gray-300">
+                      +
+                    </button>
 
-    <div *ngIf="(cart.cartItems$ | async) as items; else emptyCart">
-      <div *ngIf="items.length > 0" class="divide-y">
-        <div *ngFor="let item of items; let i = index; trackBy: trackById" class="p-3 hover:bg-gray-50">
-          <div class="flex items-start justify-between">
-            <div class="flex items-start space-x-2 flex-1">
-              <div class="text-2xl">{{ item.label }}</div>
-              <div class="flex-1">
-                <div class="font-medium">{{ item.label }}</div>
-                <div class="flex items-center space-x-2 mt-2">
-                  <button (click)="cart.updateItem(i, {quantity: item.quantity - 1})" class="p-1 bg-gray-300 rounded hover:bg-gray-400">-</button>
-                  <span class="font-medium min-w-[2rem] text-center">{{ item.quantity }}</span>
-                  <button (click)="cart.updateItem(i, {quantity: item.quantity + 1})" class="p-1 bg-gray-300 rounded hover:bg-gray-400">+</button>
-                  <input type="number" [ngModel]="item.price" (ngModelChange)="cart.updateItem(i, {price:$event})" class="w-12 text-xs text-right border rounded px-1" step="0.01" min="0" />
-                  <span class="text-xs">€</span>
-                  <button (click)="cart.removeItem(i)" class="p-1 text-red-500 hover:text-red-700">✕</button>
+                    <div class="flex items-center border rounded px-1 ml-2 bg-white" [class.border-orange-400]="item.custom_price">
+                      <input type="number" 
+                             [ngModel]="item.price" 
+                             (ngModelChange)="cart.updateItem(i, {price: $event})" 
+                             class="w-14 text-xs text-right outline-none" 
+                             step="0.01" min="0" />
+                      <span class="text-[10px] text-gray-400 ml-0.5">€</span>
+                    </div>
+
+                    <button (click)="cart.removeItem(i)" 
+                            class="p-1 text-red-400 hover:text-red-600 ml-auto">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                      </svg>
+                    </button>
+                  </div>
+
+                  @if (item.discount.value > 0) {
+                    <div class="text-[10px] text-green-600 mt-1">
+                      Rabatt: -{{ item.discount.value }}{{ item.discount.type === 'percent' ? '%' : '€' }}
+                    </div>
+                  }
                 </div>
+              </div>
+              
+              <div class="text-right ml-2">
+                <div class="text-sm font-bold">{{ cart.calculateItemTotal(item) | number:'1.2-2' }}€</div>
               </div>
             </div>
           </div>
+        }
+      </div>
+    }
+  </div>
+
+  @if (cart.items().length > 0) {
+    <div class="mt-2 pt-2 border-t space-y-1">
+      <div class="flex justify-between text-xs text-gray-500">
+        <span>Zwischensumme:</span>
+        <span>{{ cart.subtotal() | number:'1.2-2' }}€</span>
+      </div>
+      @if (cart.globalDiscountAmount() > 0) {
+        <div class="flex justify-between text-xs text-green-600 font-medium">
+          <span>Rabatt:</span>
+          <span>-{{ cart.globalDiscountAmount() | number:'1.2-2' }}€</span>
         </div>
+      }
+      <div class="flex justify-between text-lg font-bold text-[#171819]">
+        <span>Gesamt:</span>
+        <span>{{ cart.cartTotal() | number:'1.2-2' }}€</span>
       </div>
     </div>
-  </div>
-  </div>
+  }
+</div>

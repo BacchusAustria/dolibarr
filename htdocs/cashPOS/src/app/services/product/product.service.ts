@@ -1,106 +1,78 @@
 // src/app/services/product/product.service.ts
-import { Injectable } from '@angular/core';
+import { Injectable, signal, inject } from '@angular/core';
 import { ApiService } from '../api.service';
 import { Product } from '../../models/product.model';
 import { Category } from '../../models/category.model';
-import { BehaviorSubject, Observable, firstValueFrom } from 'rxjs'; // WICHTIG: RxJS für Reaktivität
+import { firstValueFrom } from 'rxjs';
 
 @Injectable({
   providedIn: 'root'
 })
 export class ProductService {
+  private api = inject(ApiService);
+
+  // --- Signals (Zustand) ---
+  // Wir behalten die public signals für den direkten Zugriff
+  public products = signal<Product[]>([]);
+  public categories = signal<Category[]>([]);
+
+  // Für Abwärtskompatibilität (optional, falls andere Teile noch RxJS brauchen)
+  // public readonly products$ = toObservable(this.products);
+
+  constructor() {}
+
+  // --- API CALLS ---
+
+  async getProductsWithCategories(): Promise<Product[]> {
+    const products = await firstValueFrom(this.api.get<Product[]>('/products'));
     
-    // **********************************************
-    // ** 1. REAKTIVER ZUSTAND (Für KassaComponent) **
-    // **********************************************
-    
-    // Hält den aktuellen Produktzustand und emittiert diesen an Abonnenten
-    private _products = new BehaviorSubject<Product[]>([]);
-    public readonly products$: Observable<Product[]> = this._products.asObservable();
+    // Kategorien für jedes Produkt laden
+    await Promise.all(
+      products.map(async (product) => {
+        product.categories = await this.getCategoriesWithProduct(String(product.id));
+      })
+    );
+    return products;
+  }
 
-    // Hält den aktuellen Kategorienzustand
-    private _categories = new BehaviorSubject<Category[]>([]);
-    public readonly categories$: Observable<Category[]> = this._categories.asObservable();
+  async getCategoriesWithProduct(id: string): Promise<Category[]> {
+    return firstValueFrom(this.api.get<Category[]>(`/products/${id}/categories`));
+  }
+  
+  async getCategories(): Promise<Category[]> {
+    return firstValueFrom(this.api.get<Category[]>('/categories'));
+  }
 
-    constructor(private api: ApiService) {}
-
-    // **********************************************
-    // ** 2. API CALLS (Promise-basiert, wie vorgegeben) **
-    // **********************************************
-
-    async getProductsWithCategories(): Promise<Product[]> {
-        // Annahme: api.get gibt ein Observable zurück
-        const products = await firstValueFrom(this.api.get<Product[]>('/products'));
-        
-        await Promise.all(
-            products.map(async (product) => {
-                // Konvertiert ID zu String, falls nötig, und holt die Kategorien
-                product.categories = await this.getCategoriesWithProduct(String(product.id));
-            })
-        );
-        
-        return products;
+  // --- ZUSTANDS-AKTUALISIERUNG (Signal-Bridge) ---
+  
+  /**
+   * Lädt Produkte und aktualisiert das Signal
+   */
+  async loadProducts(): Promise<void> {
+    try {
+      const data = await this.getProductsWithCategories(); 
+      this.products.set(data); // Signal setzen
+    } catch (error) {
+      console.error('Fehler beim Laden der Produkte:', error);
     }
+  }
+  
+  /**
+   * Lädt Kategorien und aktualisiert das Signal
+   */
+  async loadCategories(): Promise<void> {
+    try {
+      const data = await this.getCategories();
+      this.categories.set(data); // Signal setzen
+    } catch (error) {
+      console.error('Fehler beim Laden der Kategorien:', error);
+    }
+  }
 
-    async getProductById(id: string): Promise<Product> {
-        return firstValueFrom(this.api.get<Product>(`/products/${id}`));
-    }
-
-    async getCategoriesWithProduct(id: string): Promise<Category[]> {
-        return firstValueFrom(this.api.get<Category[]>(`/products/${id}/categories`));
-    }
-    
-    async getCategories(): Promise<Category[]> {
-        return firstValueFrom(this.api.get<Category[]>('/categories'));
-    }
-
-    async getCategoryById(id: string): Promise<Category> {
-        return firstValueFrom(this.api.get<Category>(`/categories/${id}`));
-    }
-
-    async createProduct(product: Partial<Product>): Promise<Product> {
-        // HINWEIS: api.post muss als Observable implementiert sein, damit firstValueFrom funktioniert.
-        return firstValueFrom(this.api.post<Product>('/products', product));
-    }
-
-    async updateProduct(id: string, product: Partial<Product>): Promise<Product> {
-        // HINWEIS: api.put muss als Observable implementiert sein.
-        return firstValueFrom(this.api.put<Product>(`/products/${id}`, product));
-    }
-
-    async deleteProduct(id: string): Promise<void> {
-        // HINWEIS: api.delete muss als Observable implementiert sein.
-        await firstValueFrom(this.api.delete<void>(`/products/${id}`));
-    }
-
-    // **********************************************
-    // ** 3. ZUSTANDS-AKTUALISIERUNG (Bridge zur API) **
-    // **********************************************
-    
-    /**
-     * Führt den API-Aufruf aus und aktualisiert das reaktive _products Subject.
-     */
-    async loadProducts(): Promise<void> {
-        try {
-            const products = await this.getProductsWithCategories(); 
-            this._products.next(products);
-        } catch (error) {
-            console.error('Fehler beim Laden der Produkte:', error);
-            // Hier könnten Sie Mock-Daten laden oder Fehler-Subject aktualisieren
-            // this._products.next(MOCK_PRODUCTS);
-        }
-    }
-    
-    /**
-     * Führt den API-Aufruf aus und aktualisiert das reaktive _categories Subject.
-     */
-    async loadCategories(): Promise<void> {
-        try {
-            const categories = await this.getCategories();
-            this._categories.next(categories);
-        } catch (error) {
-            console.error('Fehler beim Laden der Kategorien:', error);
-            // this._categories.next(MOCK_CATEGORIES);
-        }
-    }
+  // Weitere API Methoden bleiben gleich, da sie nur Daten zurückgeben
+  async deleteProduct(id: string): Promise<void> {
+    await firstValueFrom(this.api.delete<void>(`/products/${id}`));
+    // Nach dem Löschen Zustand lokal aktualisieren
+    this.products.update(p => p.filter(item => item.id !== id));
+  }
 }

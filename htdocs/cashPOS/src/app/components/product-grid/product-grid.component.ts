@@ -100,7 +100,6 @@ export class ProductGridComponent {
 
 
   public getPriceForProduct(product: Product): number {
-    const priceLevelKey = '2'; // Verwenden des gewünschten Preisniveaus
-    return PriceUtils.getPriceForProduct(product, priceLevelKey);
+    return PriceUtils.getPriceForProduct(product);
   }
 }

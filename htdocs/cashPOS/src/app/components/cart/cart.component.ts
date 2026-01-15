@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+// src/app/components/cart/cart.component.ts
+import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CartService } from '../../services/cart/cart.service';
@@ -10,8 +11,10 @@ import { CartService } from '../../services/cart/cart.service';
   templateUrl: './cart.component.html'
 })
 export class CartComponent {
-  constructor(public cart: CartService) {}
+  // Modernes Inject-Pattern
+  public cart = inject(CartService);
 
+  // trackBy für Performance (optional bei @for, da track dort Pflicht ist)
   trackById(index: number, item: any) {
     return item?.id ?? index;
   }

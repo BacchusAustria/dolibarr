@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { lastValueFrom } from 'rxjs';
 import { ApiService } from '../api.service';
 import { CartItem } from '../../models/cart.model';
+import { Discount } from '../../models';
 
 export interface DolibarrInvoice {
     id: string;
@@ -45,32 +46,54 @@ export class InvoiceService {
     /**
      * Fügt eine Position hinzu
      */
-    async addLine(invoiceId: string, item: CartItem): Promise<void> {
-        const payload = {
-            subprice: item.price,
-            qty: item.quantity,
-            tva_tx: item.tva_tx,
-            fk_product: parseInt(item.id),
-            remise_percent: item.discount?.type === 'percent' ? item.discount.value : 0,
-            price_base_type: 'TTC' // Preis inklusive Steuern
-        };
-        try {
-            await lastValueFrom(
-                this.apiService.post(`/invoices/${invoiceId}/lines`, payload, { responseType: 'text' })
-            );
-        } catch (error) {
-            console.error('Line Add Error:', error);
-            throw error;
-        }
-    }
+   async addLine(
+  invoiceId: string, 
+  item: CartItem, 
+  totalCartAmount: number, 
+  totalGlobalDiscount: number = 0
+): Promise<void> {
 
+    let lineDiscountPercent = 0;
+  if (item.discount) {
+    if (item.discount.type === 'percent') {
+      lineDiscountPercent = item.discount.value;
+    } else if (item.discount.type === 'euro') {
+      lineDiscountPercent = (item.discount.value / item.price) * 100;
+    }
+  }
+
+
+  // der Gesamtrabatt wird in % übergeben
+  if (totalGlobalDiscount > 0)
+     {lineDiscountPercent += totalGlobalDiscount}
+
+
+  const payload = {
+    subprice: item.price,
+    qty: item.quantity,
+    tva_tx: item.tva_tx,
+    fk_product: parseInt(item.id),
+    // Wir senden den summierten Prozentsatz an Dolibarr
+    remise_percent: lineDiscountPercent,
+    price_base_type: 'TTC' // Da wir mit Bruttopreisen aus der Kasse kommen
+  };
+
+  try {
+    await lastValueFrom(
+      this.apiService.post(`/invoices/${invoiceId}/lines`, payload, { responseType: 'json' })
+    );
+  } catch (error) {
+    console.error('Line Add Error:', error);
+    throw error;
+  }
+}
     /**
        * Validieren
        */
     async validate(invoiceId: string): Promise<void> {
         try {
             await lastValueFrom(
-                this.apiService.post(`/invoices/${invoiceId}/validate`, {}, { responseType: 'text' })
+                this.apiService.post(`/invoices/${invoiceId}/validate`, {}, { responseType: 'json' })
             );
         } catch (error) {
             console.error('Invoice Validation Error:', error);
@@ -78,7 +101,6 @@ export class InvoiceService {
         }
 
     }
-
 
     /**
      * Zahlung buchen
@@ -94,7 +116,7 @@ export class InvoiceService {
         };
         try {
             await lastValueFrom(
-                this.apiService.post(`/invoices/${invoiceId}/payments`, payload, { responseType: 'text' })
+                this.apiService.post(`/invoices/${invoiceId}/payments`, payload, { responseType: 'json' })
             );
         } catch (error) {
             console.error('Payment Add Error:', error);

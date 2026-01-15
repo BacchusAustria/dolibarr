@@ -294,7 +294,7 @@ export class InvoiceHistoryComponent implements OnInit {
     // Falls CustomerService Promise zurückgibt:
     // this.customerService.getCustomers().then(...)
     // Falls synchron (Mock):
-    const list = this.customerService.getCustomers();
+    const list = this.customerService.customers();
     if (Array.isArray(list)) {
          list.forEach(c => { if(c.id) this.customersMap[c.id] = c.name; });
     }

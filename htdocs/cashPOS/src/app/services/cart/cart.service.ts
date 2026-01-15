@@ -1,139 +1,135 @@
 // src/app/services/cart/cart.service.ts
-import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, map, combineLatest } from 'rxjs';
+import { Injectable, signal, computed } from '@angular/core';
 import { CartItem } from '../../models/cart.model';
 import { Discount } from '../../models/discount.model';
-import { PriceUtils } from '../../utils/price.utils';
-// Import für CalculationUtils (Annahme, dass es existiert)
-// import { CalculationUtils } from '../../utils/calculation.utils'; 
+import { Product } from '../../models/product.model';
 
 @Injectable({
   providedIn: 'root',
 })
 export class CartService {
+  // --- States (Private Signals) ---
+  private _cartItems = signal<CartItem[]>([]);
+  private _globalDiscount = signal<Discount>({ value: 0, type: 'percent' });
 
-  private _cartItems = new BehaviorSubject<CartItem[]>([]);
-  public readonly cartItems$: Observable<CartItem[]> = this._cartItems.asObservable();
+  // --- Public Read-only Signals für UI & Komponenten ---
+  public items = this._cartItems.asReadonly();
+  public globalDiscount = this._globalDiscount.asReadonly();
+  
+  // Zwischensumme aller Artikel (inkl. Artikelrabatte)
+  public subtotal = computed(() => {
+    return parseFloat(
+      this._cartItems().reduce((sum, item) => sum + this.calculateItemTotal(item), 0).toFixed(2)
+    );
+  });
 
-  private _globalDiscount = new BehaviorSubject<Discount>({ value: 0, type: 'percent' });
-  public readonly globalDiscount$: Observable<Discount> = this._globalDiscount.asObservable();
-  public getGlobalDiscount(): Discount {
-    return this._globalDiscount.getValue();
-  }
+  // Der Betrag des globalen Rabatts
+  public globalDiscountAmount = computed(() => {
+    const subtotal = this.subtotal();
+    const discount = this._globalDiscount();
+    let amount = 0;
 
-    longPressTimer: number | null = null;
-  constructor() { }
+    if (discount.type === 'euro') {
+      amount = subtotal * (discount.value / 100);
+    } else {
+      amount = discount.value;
+    }
+    return parseFloat(Math.max(0, amount).toFixed(2));
+  });
+
+  // Endbetrag (Zwischensumme - globaler Rabatt)
+  public cartTotal = computed(() => {
+    const discount = this.subtotal() * (this.globalDiscountAmount()/100);
+    const total = parseFloat(Math.max(0, this.subtotal() - discount).toFixed(2));
+    return total;
+  });
+
+  // Gesamtanzahl Artikel
+  public itemCount = computed(() => {
+    return this._cartItems().reduce((acc, item) => acc + item.quantity, 0);
+  });
 
   /**
-   * Berechnet den rabattierten Gesamtbetrag für einen einzelnen Warenkorb-Posten.
+   * Berechnet den rabattierten Zeilenwert
    */
   public calculateItemTotal(item: CartItem): number {
     let lineTotal = item.quantity * item.price;
-    const discount = item.discount;
-
-    if (discount.type === 'percent') {
-      lineTotal = lineTotal * (1 - discount.value / 100);
-    } else if (discount.type === 'euro') {
-      lineTotal = lineTotal - discount.value;
+    if (item.discount.type === 'percent') {
+      lineTotal = lineTotal * (1 - item.discount.value / 100);
+    } else {
+      lineTotal = lineTotal - item.discount.value;
     }
-    // Stellt sicher, dass der Betrag nicht negativ ist
     return parseFloat(Math.max(0, lineTotal).toFixed(2));
   }
 
-
-  public readonly subtotal$: Observable<number> = this.cartItems$.pipe(
-    map(items =>
-      parseFloat(items.reduce((sum, item) => sum + this.calculateItemTotal(item), 0).toFixed(2))
-    )
-  );
-
- 
-  public readonly globalDiscountAmount$: Observable<number> = combineLatest([
-    this.subtotal$,
-    this.globalDiscount$
-  ]).pipe(
-    map(([subtotal, discount]) => {
-      let amount = 0;
-      if (discount.type === 'percent') {
-        amount = subtotal * (discount.value / 100);
-      } else if (discount.type === 'euro') {
-        amount = discount.value;
-      }
-      return parseFloat(Math.max(0, amount).toFixed(2));
-    })
-  );
-
-  public readonly cartTotal$: Observable<number> = combineLatest([
-    this.subtotal$,
-    this.globalDiscountAmount$
-  ]).pipe(
-    map(([subtotal, discountAmount]) =>
-      parseFloat(Math.max(0, subtotal - discountAmount).toFixed(2))
-    )
-  );
-  public addItemFromGrid(newItem: CartItem) {
-    const currentItems = this._cartItems.getValue();
-    const existingItemIndex = currentItems.findIndex(item =>
-      item.id === newItem.id
-    );
-    if (existingItemIndex > -1) {
-      const updatedItems = currentItems.map((item, index) => {
-        if (index === existingItemIndex) {
-          const updatedQuantity = item.quantity + newItem.quantity;
-          return { ...item, quantity: updatedQuantity };
-        }
-        return item;
-      }); 
-      this._cartItems.next(updatedItems);
-    }
-    else {
-      this._cartItems.next([...currentItems, newItem]);
-    }
-  }
-  public addItem(newItem: CartItem, replaceIfExists: boolean = false) {
-    const currentItems = this._cartItems.getValue();
-    const existingItemIndex = currentItems.findIndex(item =>
-      item.id === newItem.id
-    );
-
-    if (replaceIfExists === true && existingItemIndex > -1) {
-      const updatedItems = currentItems.map((item, index) => {
-        if (index === existingItemIndex) {
-          return { ...item, quantity: newItem.quantity, custom_price: newItem.custom_price, discount: newItem.discount, price: newItem.price, price_ttc: newItem.price_ttc};
-        }
-        return item;
-      });
-      this._cartItems.next(updatedItems);
-    } else {
-      this._cartItems.next([...currentItems, newItem]);
-    }
-  }
-
-  public removeItem(index: number) {
-    const currentItems = this._cartItems.getValue();
-    if (index >= 0 && index < currentItems.length) {
-      const updatedItems = currentItems.filter((_, i) => i !== index);
-      this._cartItems.next(updatedItems);
-    }
-  }
-
   /**
-   * Aktualisiert beliebige Felder eines Warenkorb-Postens (z.B. Menge oder Preis).
+   * Ersetzt addItemFromGrid & addItem: Fügt Produkt hinzu oder aktualisiert Menge
    */
-  public updateItem(index: number, updates: Partial<CartItem>) {
-    const currentItems = this._cartItems.getValue();
-    if (index >= 0 && index < currentItems.length) {
-      const updatedItem = { ...currentItems[index], ...updates };
-      const newItems = currentItems.map((item, i) => i === index ? updatedItem : item);
-      this._cartItems.next(newItems);
-    }
+  public addProduct(product: Product, quantity: number = 1): void {
+    this._cartItems.update(items => {
+      const existingIndex = items.findIndex(item => item.id === product.id);
+
+      if (existingIndex > -1) {
+        const updatedItems = [...items];
+        updatedItems[existingIndex] = {
+          ...updatedItems[existingIndex],
+          quantity: updatedItems[existingIndex].quantity + quantity
+        };
+        return updatedItems;
+      }
+
+      const newItem: CartItem = {
+        ...product,
+        quantity: quantity,
+        price: typeof product.price === 'string' ? parseFloat(product.price) : product.price,
+        originalPrice: typeof product.price === 'string' ? parseFloat(product.price) : product.price,
+        custom_price: false,
+        discount: { value: 0, type: 'percent' }
+      };
+      return [...items, newItem];
+    });
+  }
+  addItemFromGrid(item: CartItem): void {
+  const currentItems = this.items();
+  const existingItemIndex = currentItems.findIndex(i => i.id === item.id);
+
+  if (existingItemIndex > -1) {
+    // Wenn Artikel existiert: Menge erhöhen (aber Preis/Details des existierenden behalten?)
+    // Im Original war es oft so: Grid-Klick erhöht nur Menge.
+    const existing = currentItems[existingItemIndex];
+    this.updateItem(existingItemIndex, { 
+      quantity: existing.quantity + item.quantity 
+    });
+  } else {
+    // Wenn neu: Das komplett gemappte Objekt hinzufügen
+    this._cartItems.update(items => [...items, item]);
+  }
+}
+  /**
+   * Aktualisiert ein Item (z.B. Preisänderung oder Rabatt)
+   */
+  public updateItem(index: number, updates: Partial<CartItem>): void {
+    this._cartItems.update(items => {
+      if (index < 0 || index >= items.length) return items;
+      
+      const newItems = [...items];
+      const currentItem = newItems[index];
+      
+      // Falls der Preis manuell geändert wird -> custom_price flag setzen
+      if (updates.price !== undefined && updates.price !== currentItem.price) {
+        updates.custom_price = true;
+      }
+
+      newItems[index] = { ...currentItem, ...updates };
+      return newItems;
+    });
   }
 
-    /**
+      /**
    * Aktualisiert die Menge (für Swipe-Funktion)
    */
   public updateAmount(index: number, quantity: number) {
-    const currentItems = this._cartItems.getValue();
+    const currentItems = this._cartItems();
     if (index >= 0 && index < currentItems.length) {
       const originalAmount = currentItems[index].quantity;
       const newAmount = originalAmount + quantity;
@@ -142,48 +138,21 @@ export class CartService {
       }
     }
   }
-
-  /**
-   * Setzt den Rabatt für einen spezifischen Artikel.
-   */
-  public setItemDiscount(index: number, discount: Discount) {
-    this.updateItem(index, { discount: discount });
+  public removeItem(index: number): void {
+    this._cartItems.update(items => items.filter((_, i) => i !== index));
   }
 
-  /**
-   * Setzt den globalen Rabatt für den gesamten Warenkorb.
-   */
-  public setGlobalDiscount(discount: Discount) {
-    this._globalDiscount.next(discount);
+  public setGlobalDiscount(discount: Discount): void {
+    this._globalDiscount.set(discount);
   }
 
-  /**
-   * Setzt den Warenkorb und den globalen Rabatt zurück.
-   */
-  public resetCart() {
-    this._cartItems.next([]);
-    this._globalDiscount.next({ value: 0, type: 'percent' });
+  public resetCart(): void {
+    this._cartItems.set([]);
+    this._globalDiscount.set({ value: 0, type: 'percent' });
   }
 
-  // Synchrone Getter (für Legacy-Code wie completeTransaction in App.ts)
-  public getItems(): CartItem[] {
-    return this._cartItems.getValue();
-  }
-
-  public getCartTotal(): number {
-    let total = 0;
-    // Stellt den synchronen Wert aus dem Observable bereit
-    this.cartTotal$.subscribe(t => total = t).unsubscribe();
-    return total;
-  }
-
-  /**
-   * Sucht nach einem Produkt im Warenkorb nach ID.
-   * @param productId Die ID des Produkts
-   * @returns CartItem wenn gefunden, null wenn nicht gefunden
-   */
+  // Hilfsmethode für die Suche
   public findItemByProductId(productId: string | number): CartItem | null {
-    const items = this._cartItems.getValue();
-    return items.find(item => item.id === productId) || null;
+    return this._cartItems().find(item => item.id === productId) || null;
   }
 }

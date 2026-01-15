@@ -1,90 +1,31 @@
-import { Injectable } from '@angular/core';
-import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
+// src/app/services/api.service.ts
+import { Injectable, inject } from '@angular/core';
+import { HttpClient, HttpParams, HttpErrorResponse } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
-import { catchError, map, retry, timeout } from 'rxjs/operators';
-
-
-export interface ApiOptions {
-  responseType?: 'json' | 'text';
-  // hier könnten später auch headers etc. stehen
-}
-
-
+import { catchError, timeout } from 'rxjs/operators';
 
 @Injectable({
   providedIn: 'root'
-  
 })
-
-
 export class ApiService {
-  private apiUrl = 'https://mittermayer.bplaced.net/dolibarr/htdocs/api/index.php'; // Base API URL - configure as needed
-  private timeoutDuration = 30000; // 30 seconds timeout
-  private retryAttempts = 1;
-  constructor(private http: HttpClient) {}
+  private http = inject(HttpClient);
+  private apiUrl = 'https://mittermayer.bplaced.net/dolibarr/htdocs/api/index.php';
+  private timeoutDuration = 30000;
 
   /**
-   * Set the base API URL
-   * @param url - The base URL for API calls
+   * GET-Request
    */
-  public setApiUrl(url: string): void {
-    this.apiUrl = url;
-  }
-
-  /**
-   * GET request
-   * @param endpoint - The API endpoint (e.g., '/products')
-   * @param params - Optional query parameters
-   * @returns Observable with the response data
-   */
-  
   public get<T>(endpoint: string, params?: any): Observable<T> {
     let httpParams = new HttpParams();
-    
     if (params) {
       Object.keys(params).forEach(key => {
-        httpParams = httpParams.set(key, params[key]);
+        if (params[key] !== undefined && params[key] !== null) {
+          httpParams = httpParams.set(key, params[key]);
+        }
       });
     }
 
-    return this.http.get<T>(`${this.apiUrl}${endpoint}`, { params: httpParams, headers: this.getHeaders() })
-      .pipe(
-        retry(this.retryAttempts),
-        timeout(this.timeoutDuration),
-        catchError(this.handleError)
-      );
-  }
-
-  /**
-   * POST request
-   * @param endpoint - The API endpoint (e.g., '/products')
-   * @param data - The data to send in the request body
-   * @returns Observable with the response data
-   */
-  public post<T>(endpoint: string, data: any, options: ApiOptions = {responseType: 'json'}): Observable<T> {
-    return this.http.post<T>(`${this.apiUrl}${endpoint}`, data, {
-      headers: this.getHeaders(),
-      responseType: options.responseType as any
-    })
-      .pipe(
-        timeout(this.timeoutDuration),
-        map(res => {
-          return res as T;
-        }),
-        catchError(this.handleError)
-      );
-  }
-
-  /**
-   * PUT request
-   * @param endpoint - The API endpoint (e.g., '/products/1')
-   * @param data - The data to send in the request body
-   * @returns Observable with the response data
-   */
-  public put<T>(endpoint: string, data: any): Observable<T> {
-    return this.http.put<T>(`${this.apiUrl}${endpoint}`, data, {
-      headers: this.getHeaders()
-    })
+    return this.http.get<T>(`${this.apiUrl}${endpoint}`, { params: httpParams })
       .pipe(
         timeout(this.timeoutDuration),
         catchError(this.handleError)
@@ -92,26 +33,32 @@ export class ApiService {
   }
 
   /**
-   * PATCH request
-   * @param endpoint - The API endpoint
-   * @param data - The data to send in the request body
-   * @returns Observable with the response data
+   * POST-Request
+   * Der Trick: Wir definieren die Options so, dass Angular sicher weiß, 
+   * dass wir den JSON-Body zurückerwarten.
    */
-  public patch<T>(endpoint: string, data: any): Observable<T> {
-    return this.http.patch<T>(`${this.apiUrl}${endpoint}`, data, {
-      headers: this.getHeaders()
-    })
+  public post<T>(endpoint: string, body: any, options: { 
+    params?: HttpParams | { [param: string]: string | number | boolean | ReadonlyArray<string | number | boolean> };
+    responseType?: 'json'; // Wir fixieren dies auf 'json' für diesen Call
+  } = {}): Observable<T> {
+    
+    return this.http.post<T>(`${this.apiUrl}${endpoint}`, body, {
+      ...options,
+      responseType: 'json' // Erzwingt die Rückgabe von Observable<T> statt Observable<HttpEvent<T>>
+    }).pipe(
+      timeout(this.timeoutDuration),
+      catchError(this.handleError)
+    );
+  }
+
+  public put<T>(endpoint: string, body: any): Observable<T> {
+    return this.http.put<T>(`${this.apiUrl}${endpoint}`, body)
       .pipe(
         timeout(this.timeoutDuration),
         catchError(this.handleError)
       );
   }
 
-  /**
-   * DELETE request
-   * @param endpoint - The API endpoint (e.g., '/products/1')
-   * @returns Observable with the response data
-   */
   public delete<T>(endpoint: string): Observable<T> {
     return this.http.delete<T>(`${this.apiUrl}${endpoint}`)
       .pipe(
@@ -121,51 +68,19 @@ export class ApiService {
   }
 
   /**
-   * GET request for Blob (files like PDFs)
-   * @param endpoint - The API endpoint
-   * @returns Observable with Blob data
+   * Spezieller Request für Blobs (PDFs), hier ist der Rückgabetyp fixiert.
    */
   public getBlob(endpoint: string): Observable<Blob> {
-    return this.http.get(`${this.apiUrl}${endpoint}`, {
-      headers: this.getHeaders(),
-      responseType: 'blob'
-    })
+    return this.http.get(`${this.apiUrl}${endpoint}`, { responseType: 'blob' })
       .pipe(
-        retry(this.retryAttempts),
         timeout(this.timeoutDuration),
         catchError(this.handleError)
       );
   }
 
-  /**
-   * Get default HTTP headers
-   * @returns HttpHeaders object with common headers
-   */
-  private getHeaders(): HttpHeaders {
-    let headers = new HttpHeaders({
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    });
-    return headers;
-  }
-
-  /**
-   * Handle HTTP errors
-   * @param error - The error object
-   * @returns Observable error
-   */
-  private handleError(error: any): Observable<never> {
-    let errorMessage = 'An unknown error occurred';
-
-    if (error.error instanceof ErrorEvent) {
-      // Client-side error
-      errorMessage = `Error: ${error.error.message}`;
-    } else {
-      // Server-side error
-      errorMessage = `Error Code: ${error.status}\nMessage: ${error.message}`;
-    }
-
-    console.error(errorMessage);
+  private handleError(error: HttpErrorResponse): Observable<never> {
+    let errorMessage = error.error?.message || `Server-Fehler: ${error.status}`;
+    console.error('API Error:', error);
     return throwError(() => new Error(errorMessage));
   }
 }

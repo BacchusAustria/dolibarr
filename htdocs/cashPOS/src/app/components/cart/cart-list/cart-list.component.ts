@@ -19,6 +19,11 @@ import { PriceUtils } from '../../../utils/price.utils';
           <div class="flex-1">
             <div class="font-medium">{{ item.label }}</div>
             <div class="text-gray-500">{{ item.quantity }} x {{ item.price | number:'1.2-2' }}€</div>
+            @if (item.discount && item.discount.value > 0) {
+    <div class="text-red-500 text-xs italic">
+      Rabatt: {{ item.discount.value }}{{ item.discount.type === 'percent' ? '%' : '€' }}
+    </div>
+  }
           </div>
           <div class="text-right font-bold mr-3">{{ calculateItemTotal(item) | number:'1.2-2' }}€</div>
           
@@ -36,16 +41,16 @@ export class CartListComponent {
   @Input() subtotal: number = 0;
   @Input() globalDiscountAmount: number = 0;
   @Input() cartTotal: number = 0;
-  
+
   @Input() calculateItemTotal: (item: CartItem) => number = () => 0;
 
   @Output() removeItem = new EventEmitter<number>();
   @Output() openDiscountModal = new EventEmitter<{ type: 'item' | 'global', index?: number }>();
-  @Output() itemQuantityChange = new EventEmitter<{ index: number, quantity: number }>(); 
+  @Output() itemQuantityChange = new EventEmitter<{ index: number, quantity: number }>();
   @Output() itemLongPress = new EventEmitter<number>();
-  
+
   public PriceUtils = PriceUtils;
-  
+
   // Swipe-Logik Variablen
   public startX: number = 0;
   private swipeThreshold: number = 80; // Notwendige Pixel-Distanz für eine gültige Geste
@@ -61,7 +66,7 @@ export class CartListComponent {
     this.longPressTimer = setTimeout(() => {
       this.islongPress = true;
       this.itemLongPress.emit(index)
-        }, 500);
+    }, 500);
   }
 
   handleTouchEnd(event: TouchEvent, index: number) {
@@ -72,7 +77,7 @@ export class CartListComponent {
       this.startX = 0;
       return;
     }
-    if (this.startX === 0) return; 
+    if (this.startX === 0) return;
 
     const endX = event.changedTouches[0].clientX;
     const diffX = endX - this.startX;
@@ -86,7 +91,7 @@ export class CartListComponent {
         this.itemQuantityChange.emit({ index: index, quantity: -1 });
       }
     }
-    
+
     // Zustand zurücksetzen
     this.startX = 0;
   }

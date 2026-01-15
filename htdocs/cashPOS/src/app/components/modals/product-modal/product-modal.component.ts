@@ -52,7 +52,7 @@ export interface TempProduct {
     <div class="text-center mb-6">
         <h3 class="text-xl font-bold text-gray-800">{{ product.label }}</h3>
         <p class="text-xs text-gray-500 uppercase tracking-wider">
-            Basis: {{ PriceUtils.getPriceForProduct(product, '2') | number:'1.2-2' }}€
+            Basis: {{ PriceUtils.getPriceForProduct(product) | number:'1.2-2' }}€
         </p>
     </div>
           
