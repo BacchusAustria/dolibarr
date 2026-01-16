@@ -361,8 +361,13 @@ class Paiement extends CommonObject
 			// Set the currency of the invoice
 			$currencyofinvoiceforthisline = empty($this->multicurrency_code[$key]) ? $invoice_multicurrency_code : $this->multicurrency_code[$key];
 			// If a payment was entered into the section of the foreign currency of invoice, we want to pay in the currency of invoice
-			$currencyofpaymentforthisline = empty($this->multicurrency_amounts[$key]) ? $conf->currency : $this->multicurrency_code[$key];
-
+			//$currencyofpaymentforthisline = empty($this->multicurrency_amounts[$key]) ? $conf->currency : $this->multicurrency_code[$key];
+			if (!empty($conf->multicurrency->enabled) && isset($this->multicurrency_code[$key])) {
+				$currencyofpaymentforthisline = $this->multicurrency_code[$key];
+			} else {
+				// Fallback auf Standardwährung des Systems
+				$currencyofpaymentforthisline = $conf->currency;
+}
 			//var_dump("Invoice ID: ".$key.", amount in company cur:".$this->amounts[$key]." amount in invoice cur:".$this->multicurrency_amounts[$key]." => currencyofinvoice= ".$currencyofinvoiceforthisline." - currencyofpaymentforthisline =".$currencyofpaymentforthisline);
 
 			if (empty($currencyofinvoices)) {
